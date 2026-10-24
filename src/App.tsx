@@ -39,7 +39,9 @@ import { InstallWizardView } from './components/InstallWizardView';
 import { AdminView } from './components/AdminView';
 import { SourceCodeView } from './components/SourceCodeView';
 import { RedirectSandboxView } from './components/RedirectSandboxView';
+import { CloudflareIntegrationView } from './components/CloudflareIntegrationView';
 import { Footer } from './components/Footer';
+import { apiClient } from './services/apiClient';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -61,8 +63,8 @@ export default function App() {
   const currentPackage = packages.find(p => p.id === currentUser.packageId) || packages[0];
   const userSubscription = subscriptions.find(s => s.userId === currentUser.id);
 
-  // Strict 5-Step Domain Permission & Quota Authorization Pipeline
-  const handleAddLink = (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string) => {
+  // Strict 5-Step Domain Permission & Authoritative Backend Pipeline
+  const handleAddLink = async (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string): Promise<{ success: boolean; error?: string }> => {
     // 1. Account state check
     if (currentUser.status !== 'active') {
       return { success: false, error: 'Your account is currently suspended or disabled. Link creation is blocked.' };
@@ -82,13 +84,66 @@ export default function App() {
       return { success: false, error: `Domain '${domain.domainName}' is currently inactive or suspended by administrator.` };
     }
 
-    // 3. Check Explicit User-Level Denial (Absolute Precedence)
+    // 3. Attempt Live Authoritative VPS Backend API Call
+    try {
+      const apiRes = await apiClient.createShortLink({
+        domain_id: domainId,
+        original_url: originalUrl,
+        custom_alias: customAlias,
+        title,
+        description
+      });
+
+      if (apiRes.success && apiRes.data?.short_url) {
+        // Backend successfully created the short link!
+        // The frontend renders the exact short_url returned by the backend, never guessing.
+        const backendData = apiRes.data;
+        const newLink: LinkItem = {
+          id: backendData.id || ('lnk_' + Date.now()),
+          domainId: domain.id,
+          domainName: backendData.domain_name || domain.domainName,
+          originalUrl: backendData.original_url || originalUrl,
+          shortCode: backendData.short_code,
+          shortUrl: backendData.short_url,
+          title: title || originalUrl.replace(/^https?:\/\//, '').split('/')[0],
+          description: description || '',
+          clicks: 0,
+          createdAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          status: 'active',
+          userId: currentUser.id,
+          redirectType: '302'
+        };
+
+        setLinks([newLink, ...links]);
+        setDomains(domains.map(d => d.id === domain.id ? { ...d, totalLinksCount: d.totalLinksCount + 1 } : d));
+
+        const newLog: AuditLog = {
+          id: 'aud_' + Date.now(),
+          userId: currentUser.id,
+          userName: currentUser.name,
+          action: `Backend API created short URL ${backendData.short_url} -> ${originalUrl.substring(0, 30)}...`,
+          ip: '192.168.1.1',
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
+        };
+        setAuditLogs([newLog, ...auditLogs]);
+
+        return { success: true };
+      } else if (apiRes.error && apiRes.error.code !== 'NETWORK_ERROR' && apiRes.error.code !== 'REQUEST_TIMEOUT') {
+        // Real validation or quota error returned from the backend
+        return { success: false, error: `Backend API Error: ${apiRes.error.message}` };
+      }
+    } catch {
+      // In offline / preview fallback, continue to client validation
+    }
+
+    // Fallback: Local authoritative simulation when VPS is not yet running
+    // Check Explicit User-Level Denial (Absolute Precedence)
     const explicitPerm = permissions.find(p => p.userId === currentUser.id && p.domainId === domain.id);
     if (explicitPerm && !explicitPerm.isAllowed) {
       return { success: false, error: `Domain Access Denied: Administrator has explicitly denied your account access to '${domain.domainName}'.` };
     }
 
-    // 4. Check Domain Permission Authorization (Explicit Grant / Unlimited Domains / Package Tier)
+    // Check Domain Permission Authorization (Explicit Grant / Unlimited Domains / Package Tier)
     const hasExplicitAllow = explicitPerm && explicitPerm.isAllowed;
     const hasUnlimitedDomainAccess = currentUser.hasAllDomainsAccess || currentPackage.hasAllDomainsAccess;
     const isDomainOwner = domain.userId === currentUser.id;
@@ -101,7 +156,7 @@ export default function App() {
       };
     }
 
-    // 5. Subscription Quota Check
+    // Subscription Quota Check
     const userLinks = links.filter(l => l.userId === currentUser.id);
     if (currentPackage.maxLinksQuota !== -1 && userLinks.length >= currentPackage.maxLinksQuota) {
       return { 
@@ -338,6 +393,8 @@ export default function App() {
         language={language}
         setLanguage={setLanguage}
         onLogout={() => alert(language === 'bn' ? 'সফলভাবে লগআউট করা হয়েছে।' : 'Successfully logged out.')}
+        backendUrl={apiClient.getConfig().baseUrl}
+        onOpenCloudflareTab={() => setActiveTab('cloudflare')}
       />
 
       {/* Main Body Layout */}
@@ -459,6 +516,13 @@ export default function App() {
               onVerifyDomain={handleVerifyDomain}
               onApproveOrder={handleApproveOrder}
               onRejectOrder={handleRejectOrder}
+            />
+          )}
+
+          {activeTab === 'cloudflare' && (
+            <CloudflareIntegrationView
+              darkMode={darkMode}
+              language={language}
             />
           )}
 

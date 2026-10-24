@@ -27,7 +27,7 @@ interface LinksViewProps {
   settings: AppSettings;
   darkMode: boolean;
   language: 'bn' | 'en';
-  onAddLink: (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string) => { success: boolean; error?: string };
+  onAddLink: (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string) => { success: boolean; error?: string } | Promise<{ success: boolean; error?: string }>;
   onDeleteLink: (id: string) => void;
 }
 
@@ -96,12 +96,12 @@ export const LinksView: React.FC<LinksViewProps> = ({
     return matchesSearch && matchesStatus && matchesDomain;
   });
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
     if (!originalUrl.trim()) return;
 
-    const result = onAddLink(selectedDomainId, originalUrl, customAlias, title, description);
+    const result = await onAddLink(selectedDomainId, originalUrl, customAlias, title, description);
     if (!result.success) {
       setModalError(result.error || 'Failed to create link.');
       return;

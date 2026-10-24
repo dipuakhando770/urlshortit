@@ -50,7 +50,7 @@ interface DashboardViewProps {
   settings: AppSettings;
   darkMode: boolean;
   language: 'bn' | 'en';
-  onAddLink: (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string) => { success: boolean; error?: string };
+  onAddLink: (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string) => { success: boolean; error?: string } | Promise<{ success: boolean; error?: string }>;
   onNavigateLinks: () => void;
   onNavigateDomains: () => void;
   onNavigateBilling: () => void;
@@ -85,7 +85,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const currentPackage = packages.find(p => p.id === currentUser.packageId) || packages[0];
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     if (!originalUrl.trim()) {
@@ -93,7 +93,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       return;
     }
 
-    const result = onAddLink(selectedDomainId, originalUrl, customAlias, title, 'Created from Dashboard Quick Shortener');
+    const result = await onAddLink(selectedDomainId, originalUrl, customAlias, title, 'Created from Dashboard Quick Shortener');
     if (!result.success) {
       setErrorMsg(result.error || 'Failed to create short link.');
       return;

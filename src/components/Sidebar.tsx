@@ -9,10 +9,11 @@ import {
   ExternalLink,
   Globe,
   CreditCard,
-  Zap
+  Zap,
+  Cloud
 } from 'lucide-react';
 
-export type TabType = 'dashboard' | 'domains' | 'links' | 'billing' | 'analytics' | 'installer' | 'admin' | 'codebase' | 'sandbox';
+export type TabType = 'dashboard' | 'domains' | 'links' | 'billing' | 'analytics' | 'installer' | 'admin' | 'cloudflare' | 'codebase' | 'sandbox';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -91,6 +92,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       labelEn: 'Admin Panel',
       icon: ShieldAlert,
       badge: pendingOrdersCount > 0 ? `${pendingOrdersCount} New` : 'Admin'
+    },
+    {
+      id: 'cloudflare',
+      labelBn: 'ক্লাউডফ্লেয়ার ও ভিপিএস',
+      labelEn: 'Cloudflare & VPS API',
+      icon: Cloud,
+      badge: 'Edge'
     },
     {
       id: 'codebase',

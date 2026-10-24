@@ -1,0 +1,11 @@
+name = "linkpro-enterprise-frontend"
+compatibility_date = "2026-10-24"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist"
+
+[vars]
+BACKEND_API_URL = "https://api.lnk.pro"
+ENVIRONMENT = "production"
+
+# Cloudflare Pages Functions configuration
+# Deploy with: npx wrangler pages deploy dist

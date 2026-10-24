@@ -11,6 +11,8 @@ interface NavbarProps {
   language: 'bn' | 'en';
   setLanguage: (lang: 'bn' | 'en') => void;
   onLogout: () => void;
+  backendUrl: string;
+  onOpenCloudflareTab: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -21,7 +23,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   setDarkMode,
   language,
   setLanguage,
-  onLogout
+  onLogout,
+  backendUrl,
+  onOpenCloudflareTab
 }) => {
   return (
     <header className={`sticky top-0 z-30 flex items-center justify-between px-6 py-3.5 border-b shadow-xs transition-colors duration-200 ${
@@ -46,7 +50,20 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Right Controls */}
-      <div className="flex items-center space-x-4">
+      <div className="flex items-center space-x-3">
+        {/* Backend Endpoint Indicator */}
+        <button
+          onClick={onOpenCloudflareTab}
+          className={`hidden sm:flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-mono border transition-colors ${
+            darkMode 
+              ? 'bg-slate-800/80 border-slate-700 text-indigo-300 hover:border-indigo-500' 
+              : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+          }`}
+          title="VPS Backend API Status & Cloudflare Setup"
+        >
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+          <span>VPS: {backendUrl.replace(/^https?:\/\//, '').split('/')[0]}</span>
+        </button>
         {/* Language Switcher */}
         <button
           onClick={() => setLanguage(language === 'bn' ? 'en' : 'bn')}

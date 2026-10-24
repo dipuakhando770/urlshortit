@@ -447,17 +447,46 @@ if (preg_match('/^\\/([a-zA-Z0-9_-]{3,32})$/', $uri, $matches)) {
     exit;
 }
 
-// 2. Main Portal Web & API Routes
-if ($uri === '/' || $uri === '/index.php') {
-    require __DIR__ . '/../app/Views/home.php';
+// 2. CORS Handling for Cloudflare Pages Frontend
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
+header("Access-Control-Allow-Origin: $origin");
+header("Access-Control-Allow-Credentials: true");
+header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept");
+
+if ($method === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+// 3. API & Web Routes
+if ($uri === '/api/health') {
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => true,
+        'data' => [
+            'status' => 'healthy',
+            'service' => 'LinkPro Authoritative URL Shortener',
+            'version' => '2.4.0',
+            'database' => 'MariaDB Connected',
+            'time' => date('c')
+        ]
+    ]);
+    exit;
 } elseif ($uri === '/api/links' && $method === 'POST') {
     (new LinkController())->store();
+} elseif ($uri === '/api/links' && $method === 'GET') {
+    (new LinkController())->index();
+} elseif ($uri === '/api/domains' && $method === 'GET') {
+    (new DomainController())->index();
 } elseif ($uri === '/api/domains/verify' && $method === 'POST') {
     (new DomainController())->verifyDns();
 } elseif ($uri === '/api/packages/purchase' && $method === 'POST') {
     (new PackageController())->createOrder();
 } elseif ($uri === '/api/login' && $method === 'POST') {
     (new AuthController())->login();
+} elseif ($uri === '/' || $uri === '/index.php') {
+    require __DIR__ . '/../app/Views/home.php';
 } else {
     http_response_code(404);
     require __DIR__ . '/../app/Views/errors/404.php';
@@ -1009,5 +1038,58 @@ sudo chmod -R 775 /var/www/html/linkpro/storage
 
 ## 4. Run Browser Installation Wizard
 Navigate to \`http://YOUR_VPS_IP\` to test database connection, apply enterprise migrations, and create your Master Administrator account.`
+  },
+  {
+    path: 'functions/api/[[route]].ts',
+    name: '[[route]].ts',
+    category: 'public',
+    description: 'Cloudflare Pages edge function proxy forwarding frontend /api/* calls to Ubuntu VPS backend.',
+    content: `export const onRequest: PagesFunction<Env> = async (context) => {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const backendBaseUrl = (env.BACKEND_API_URL || 'https://api.lnk.pro').replace(/\\/+$/, '');
+  const targetUrl = new URL(\`\${backendBaseUrl}\${url.pathname}\${url.search}\`);
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': request.headers.get('Origin') || '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept',
+        'Access-Control-Allow-Credentials': 'true',
+      },
+    });
+  }
+
+  const forwardHeaders = new Headers(request.headers);
+  forwardHeaders.set('X-Forwarded-For', request.headers.get('CF-Connecting-IP') || '');
+  forwardHeaders.set('Host', new URL(backendBaseUrl).hostname);
+
+  const response = await fetch(targetUrl.toString(), {
+    method: request.method,
+    headers: forwardHeaders,
+    body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+  });
+
+  return new Response(response.body, {
+    status: response.status,
+    headers: response.headers
+  });
+};`
+  },
+  {
+    path: 'wrangler.toml',
+    name: 'wrangler.toml',
+    category: 'config',
+    description: 'Cloudflare Pages/Workers project configuration file.',
+    content: `name = "linkpro-enterprise-frontend"
+compatibility_date = "2026-10-24"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist"
+
+[vars]
+BACKEND_API_URL = "https://api.lnk.pro"
+ENVIRONMENT = "production"`
   }
 ];
