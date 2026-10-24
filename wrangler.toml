@@ -1,4 +1,4 @@
-name = "linkpro-enterprise-frontend"
+name = "urlshortit"
 main = "src/index.ts"
 compatibility_date = "2026-10-24"
 compatibility_flags = ["nodejs_compat"]
