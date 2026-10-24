@@ -7,10 +7,12 @@ import {
   ShieldAlert, 
   Code2, 
   ExternalLink,
+  Globe,
+  CreditCard,
   Zap
 } from 'lucide-react';
 
-export type TabType = 'dashboard' | 'links' | 'analytics' | 'installer' | 'admin' | 'codebase' | 'sandbox';
+export type TabType = 'dashboard' | 'domains' | 'links' | 'billing' | 'analytics' | 'installer' | 'admin' | 'codebase' | 'sandbox';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -18,7 +20,9 @@ interface SidebarProps {
   darkMode: boolean;
   language: 'bn' | 'en';
   totalLinks: number;
+  totalDomains: number;
   totalClicks: number;
+  pendingOrdersCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -27,7 +31,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   darkMode,
   language,
   totalLinks,
-  totalClicks
+  totalDomains,
+  totalClicks,
+  pendingOrdersCount = 0
 }) => {
   const menuItems = [
     {
@@ -38,11 +44,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: null
     },
     {
+      id: 'domains',
+      labelBn: 'কাস্টম ডোমেইন',
+      labelEn: 'Custom Domains',
+      icon: Globe,
+      badge: `${totalDomains} verified`
+    },
+    {
       id: 'links',
       labelBn: 'আমার লিংকসমূহ',
       labelEn: 'My Links',
       icon: Link2,
       badge: totalLinks
+    },
+    {
+      id: 'billing',
+      labelBn: 'প্যাকেজ ও বিলিং',
+      labelEn: 'Plans & Billing',
+      icon: CreditCard,
+      badge: 'Upgrade'
     },
     {
       id: 'analytics',
@@ -53,28 +73,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'sandbox',
-      labelBn: 'লাইভ রিডাইরেক্ট টেস্ট',
-      labelEn: 'Redirect Sandbox',
+      labelBn: 'লাইভ 302 রিডাইরেক্ট',
+      labelEn: 'Direct 302 Sandbox',
       icon: ExternalLink,
       badge: 'Live'
     },
     {
       id: 'installer',
-      labelBn: 'ব্রাউজার ইন্সটলার উইজার্ড',
+      labelBn: 'ব্রাউজার ইন্সটলার',
       labelEn: 'Browser Installer',
       icon: Wrench,
       badge: 'VPS'
     },
     {
       id: 'admin',
-      labelBn: 'অ্যাডমিন প্যানেল',
+      labelBn: 'অ্যাডমিন কনসোল',
       labelEn: 'Admin Panel',
       icon: ShieldAlert,
-      badge: 'Secure'
+      badge: pendingOrdersCount > 0 ? `${pendingOrdersCount} New` : 'Admin'
     },
     {
       id: 'codebase',
-      labelBn: 'পিএইচপি সোর্স কোড ও রিপো',
+      labelBn: 'পিএইচপি রিপোজিটরি',
       labelEn: 'PHP Source & GitHub',
       icon: Code2,
       badge: 'GitHub'
@@ -82,12 +102,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className={`w-64 min-h-[calc(100vh-65px)] flex flex-col border-r transition-colors duration-200 ${
+    <aside className={`w-64 min-h-[calc(100vh-65px)] flex flex-col border-r transition-colors duration-200 shrink-0 ${
       darkMode ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
     }`}>
       <div className="p-4 space-y-1">
         <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-          {language === 'bn' ? 'প্রধান মেনু' : 'Main Navigation'}
+          {language === 'bn' ? 'প্রধান মেনু' : 'Enterprise Navigation'}
         </div>
 
         {menuItems.map((item) => {
@@ -97,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id as TabType)}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
                 isActive
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
                   : darkMode
@@ -125,18 +145,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </div>
 
-      {/* VPS Deployment Status Box */}
+      {/* Deployment & Architecture Badge */}
       <div className="mt-auto p-4 m-4 rounded-2xl bg-gradient-to-br from-indigo-900/40 to-slate-900/60 border border-indigo-500/20 text-xs space-y-2">
         <div className="flex items-center space-x-2 text-indigo-400 font-semibold">
           <Zap className="w-4 h-4" />
-          <span>Ubuntu VPS Ready</span>
+          <span>Multi-Domain 302 Engine</span>
         </div>
-        <p className="text-slate-400 leading-relaxed">
-          PHP 8.2 • Nginx FastCGI • MariaDB PDO • Clean 302 Redirection
+        <p className="text-slate-400 text-[11px] leading-relaxed">
+          PHP 8.2 • Nginx FastCGI • MariaDB Compound Index • DNS TXT Challenge
         </p>
-        <div className="pt-1 flex items-center justify-between text-[11px] text-emerald-400 font-medium">
-          <span>● Status: Online</span>
-          <span>100% Uptime</span>
+        <div className="pt-1 flex items-center justify-between text-[10px] text-emerald-400 font-medium">
+          <span>● Redirection &lt; 2ms</span>
+          <span>Zero Intermediate</span>
         </div>
       </div>
     </aside>

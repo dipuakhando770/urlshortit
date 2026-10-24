@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LinkItem, ClickEvent, AppSettings } from '../types';
+import { LinkItem, ClickEvent, AppSettings, CustomDomain, UserProfile, PackageTier, UserDomainPermission } from '../types';
 import { 
   Link2, 
   MousePointerClick, 
@@ -10,7 +10,11 @@ import {
   Sparkles, 
   ExternalLink,
   Plus,
-  ArrowRight
+  ArrowRight,
+  Globe,
+  Lock,
+  Layers,
+  ShieldCheck
 } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
 import {
@@ -38,23 +42,36 @@ ChartJS.register(
 
 interface DashboardViewProps {
   links: LinkItem[];
+  domains: CustomDomain[];
+  currentUser: UserProfile;
+  packages: PackageTier[];
+  permissions: UserDomainPermission[];
   clickEvents: ClickEvent[];
   settings: AppSettings;
   darkMode: boolean;
   language: 'bn' | 'en';
-  onAddLink: (originalUrl: string, customAlias?: string, title?: string, description?: string) => void;
+  onAddLink: (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string) => { success: boolean; error?: string };
   onNavigateLinks: () => void;
+  onNavigateDomains: () => void;
+  onNavigateBilling: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   links,
+  domains,
+  currentUser,
+  packages,
+  permissions,
   clickEvents,
   settings,
   darkMode,
   language,
   onAddLink,
-  onNavigateLinks
+  onNavigateLinks,
+  onNavigateDomains,
+  onNavigateBilling
 }) => {
+  const [selectedDomainId, setSelectedDomainId] = useState(domains[0]?.id || 'dom_1');
   const [originalUrl, setOriginalUrl] = useState('');
   const [customAlias, setCustomAlias] = useState('');
   const [title, setTitle] = useState('');
@@ -66,6 +83,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const activeLinks = links.filter(l => l.status === 'active').length;
   const clicksToday = clickEvents.filter(c => c.clickedAt.startsWith('2026-10-24')).length + 12;
 
+  const currentPackage = packages.find(p => p.id === currentUser.packageId) || packages[0];
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -73,18 +92,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       setErrorMsg(language === 'bn' ? 'অনুগ্রহ করে একটি বৈধ ইউআরএল দিন।' : 'Please enter a valid URL.');
       return;
     }
-    try {
-      new URL(originalUrl);
-    } catch {
-      setErrorMsg(language === 'bn' ? 'অমান্য ইউআরএল ফরম্যাট।' : 'Invalid URL format.');
+
+    const result = onAddLink(selectedDomainId, originalUrl, customAlias, title, 'Created from Dashboard Quick Shortener');
+    if (!result.success) {
+      setErrorMsg(result.error || 'Failed to create short link.');
       return;
     }
 
-    onAddLink(originalUrl, customAlias, title, 'Created from Dashboard');
     setOriginalUrl('');
     setCustomAlias('');
     setTitle('');
-    setSuccessMessage(language === 'bn' ? 'সফলভাবে শর্ট লিংক তৈরি করা হয়েছে!' : 'Short link created successfully!');
+    setSuccessMessage(language === 'bn' ? 'সফলভাবে ব্র্যান্ডেড শর্ট লিংক তৈরি করা হয়েছে!' : 'Branded short link generated successfully!');
     setTimeout(() => setSuccessMessage(null), 4000);
   };
 
@@ -101,7 +119,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {
         fill: true,
         label: language === 'bn' ? 'দৈনিক ক্লিক' : 'Daily Clicks',
-        data: [15, 28, 45, 62, 88, 110, clicksToday],
+        data: [18, 32, 54, 76, 95, 120, clicksToday],
         borderColor: 'rgb(99, 102, 241)',
         backgroundColor: darkMode ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.1)',
         tension: 0.4,
@@ -111,9 +129,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const chartOptions = {
     responsive: true,
-    plugins: {
-      legend: { display: false },
-    },
+    plugins: { legend: { display: false } },
     scales: {
       x: { grid: { display: false }, ticks: { color: darkMode ? '#94a3b8' : '#64748b' } },
       y: { grid: { color: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }, ticks: { color: darkMode ? '#94a3b8' : '#64748b' } }
@@ -131,21 +147,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="flex items-center space-x-2 text-indigo-600 dark:text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-1">
               <Sparkles className="w-4 h-4" />
-              <span>{language === 'bn' ? 'লিংকপ্রো এসএএস প্ল্যাটফর্ম' : 'LinkPro SaaS Platform'}</span>
+              <span>{language === 'bn' ? 'লিংকপ্রো এন্টারপ্রাইজ এসএএস' : 'LinkPro Enterprise URL Shortener'}</span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight">
-              {language === 'bn' ? 'স্বাগতম, নাসির মিয়া!' : 'Welcome back, Nasir Mia!'}
+              {language === 'bn' ? `স্বাগতম, ${currentUser.name}!` : `Welcome back, ${currentUser.name}!`}
             </h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               {language === 'bn' 
-                ? 'আপনার লিংকগুলো পরিচালনা করুন, তাৎক্ষণিক রিডাইরেক্ট এবং ক্লিক অ্যানালিটিক্স ট্র্যাক করুন।'
-                : 'Manage your short links, monitor instantaneous 302 redirects, and analyze click metrics.'}
+                ? 'কাস্টম ব্র্যান্ডেড ডোমেইন, তাৎক্ষণিক থ্রি-ও-টু (302) রিডাইরেক্ট এবং ক্লিক মেট্রিক্স পরিচালনা করুন।'
+                : 'Manage branded custom domains, monitor instant 302 redirects, and review subscription quotas.'}
             </p>
           </div>
+
           <div className="flex items-center space-x-3">
             <button
+              onClick={onNavigateBilling}
+              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs border border-slate-700 flex items-center space-x-2 transition-all"
+            >
+              <Layers className="w-4 h-4 text-indigo-400" />
+              <span>{currentPackage.name} Tier</span>
+            </button>
+            <button
               onClick={onNavigateLinks}
-              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm shadow-md shadow-indigo-500/25 transition-all flex items-center space-x-2"
+              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-500/25 transition-all flex items-center space-x-2"
             >
               <span>{language === 'bn' ? 'সকল লিংক দেখুন' : 'View All Links'}</span>
               <ArrowRight className="w-4 h-4" />
@@ -158,9 +182,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: language === 'bn' ? 'মোট লিংক' : 'Total Links', value: links.length, icon: Link2, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
+          { label: language === 'bn' ? 'কাস্টম ডোমেইন' : 'Active Domains', value: domains.filter(d => d.isVerified).length, icon: Globe, color: 'text-purple-500', bg: 'bg-purple-500/10' },
           { label: language === 'bn' ? 'মোট ক্লিক' : 'Total Clicks', value: totalClicks, icon: MousePointerClick, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-          { label: language === 'bn' ? 'আজকের ক্লিক' : 'Clicks Today', value: clicksToday, icon: TrendingUp, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-          { label: language === 'bn' ? 'সক্রিয় লিংক' : 'Active Links', value: `${activeLinks}/${links.length}`, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+          { label: language === 'bn' ? 'কোটা ব্যবহার' : 'Quota Used', value: currentPackage.maxLinksQuota === -1 ? 'Unlimited' : `${links.length}/${currentPackage.maxLinksQuota}`, icon: ShieldCheck, color: 'text-amber-500', bg: 'bg-amber-500/10' },
         ].map((stat, i) => {
           const Icon = stat.icon;
           return (
@@ -192,25 +216,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <Plus className="w-4 h-4" />
             </div>
             <h2 className="text-base font-bold">
-              {language === 'bn' ? 'দ্রুত শর্ট লিংক তৈরি করুন' : 'Create Short Link'}
+              {language === 'bn' ? 'ব্র্যান্ডেড শর্ট লিংক তৈরি করুন' : 'Create Branded Link'}
             </h2>
           </div>
 
           {successMessage && (
-            <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium animate-fadeIn">
+            <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium animate-fadeIn">
               {successMessage}
             </div>
           )}
 
           {errorMsg && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium animate-fadeIn">
+            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-medium animate-fadeIn">
               {errorMsg}
             </div>
           )}
 
           <form onSubmit={handleCreate} className="space-y-4">
+            {/* Domain Selector */}
             <div>
-              <label className="block text-xs font-medium mb-1.5 text-slate-500 dark:text-slate-400">
+              <label className="block text-xs font-medium mb-1.5 text-slate-400">
+                {language === 'bn' ? 'ডোমেইন নির্বাচন করুন' : 'Short Domain'}
+              </label>
+              <select
+                value={selectedDomainId}
+                onChange={(e) => setSelectedDomainId(e.target.value)}
+                className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-none font-mono ${
+                  darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                }`}
+              >
+                {domains.filter(d => d.isVerified).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    https://{d.domainName}/
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium mb-1.5 text-slate-400">
                 {language === 'bn' ? 'মূল ইউআরএল (ডেসটিনেশন)' : 'Original URL'}
               </label>
               <input
@@ -228,32 +272,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-medium mb-1.5 text-slate-500 dark:text-slate-400">
+              <label className="block text-xs font-medium mb-1.5 text-slate-400">
                 {language === 'bn' ? 'কাস্টম শর্ট কোড (ঐচ্ছিক)' : 'Custom Alias (Optional)'}
               </label>
               <input
                 type="text"
-                placeholder="e.g. my-brand"
+                placeholder="e.g. promo2026"
                 value={customAlias}
                 onChange={(e) => setCustomAlias(e.target.value)}
-                className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none transition-all ${
-                  darkMode 
-                    ? 'bg-slate-800 border-slate-700 text-white focus:border-indigo-500' 
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-600'
-                }`}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5 text-slate-500 dark:text-slate-400">
-                {language === 'bn' ? 'লিংকের শিরোনাম (ঐচ্ছিক)' : 'Title (Optional)'}
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. Summer Campaign"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none transition-all ${
+                className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none font-mono ${
                   darkMode 
                     ? 'bg-slate-800 border-slate-700 text-white focus:border-indigo-500' 
                     : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-600'
@@ -263,7 +290,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm shadow-md shadow-indigo-500/25 transition-all flex items-center justify-center space-x-2"
+              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-500/25 transition-all flex items-center justify-center space-x-2"
             >
               <Sparkles className="w-4 h-4" />
               <span>{language === 'bn' ? 'শর্ট লিংক জেনারেট করুন' : 'Generate Short URL'}</span>
@@ -278,14 +305,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-base font-bold">
-                {language === 'bn' ? 'ক্লিক প্রবণতা বিশ্লেষণ' : 'Click Trends Overview'}
+                {language === 'bn' ? 'ক্লিক প্রবণতা বিশ্লেষণ' : 'Click Trends & Redirection Velocity'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {language === 'bn' ? 'গত ৭ দিনের দৈনিক ভিজিটর ট্রাফিক' : 'Visitor traffic over the last 7 days'}
+                {language === 'bn' ? 'গত ৭ দিনের দৈনিক ভিজিটর ট্রাফিক ও সরাসরি রিডাইরেক্ট' : 'Direct 302 traffic over the last 7 days'}
               </p>
             </div>
-            <span className="text-xs px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-500 font-semibold">
-              Live 302 Tracking
+            <span className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">
+              Single-Step 302 Active
             </span>
           </div>
 
@@ -316,8 +343,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <table className="w-full text-left text-sm">
             <thead>
               <tr className={`border-b text-xs font-semibold text-slate-400 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-                <th className="pb-3">{language === 'bn' ? 'শিরোনাম ও শর্ট কোড' : 'Title & Short Code'}</th>
-                <th className="pb-3">{language === 'bn' ? 'মূল ডেসটিনেশন' : 'Original URL'}</th>
+                <th className="pb-3">{language === 'bn' ? 'ডোমেইন ও কোড' : 'Branded URL'}</th>
+                <th className="pb-3">{language === 'bn' ? 'মূল ডেসটিনেশন' : 'Destination'}</th>
                 <th className="pb-3">{language === 'bn' ? 'ক্লিক' : 'Clicks'}</th>
                 <th className="pb-3">{language === 'bn' ? 'স্ট্যাটাস' : 'Status'}</th>
                 <th className="pb-3 text-right">{language === 'bn' ? 'অ্যাকশন' : 'Action'}</th>
@@ -328,34 +355,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <tr key={link.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                   <td className="py-3.5 pr-4">
                     <div className="font-semibold text-sm">{link.title || link.shortCode}</div>
-                    <a 
-                      href={`/${link.shortCode}`} 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1 mt-0.5"
-                    >
-                      <span>lnk.pro/{link.shortCode}</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    <span className="text-xs font-mono text-indigo-400 font-medium">
+                      {link.domainName}/{link.shortCode}
+                    </span>
                   </td>
-                  <td className="py-3.5 pr-4 max-w-xs truncate text-slate-500 dark:text-slate-400 text-xs">
+                  <td className="py-3.5 pr-4 max-w-xs truncate text-slate-400 text-xs font-mono">
                     {link.originalUrl}
                   </td>
-                  <td className="py-3.5 pr-4 font-semibold text-emerald-600 dark:text-emerald-400">
+                  <td className="py-3.5 pr-4 font-semibold text-emerald-400">
                     {link.clicks}
                   </td>
                   <td className="py-3.5 pr-4">
                     <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
                       link.status === 'active' 
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' 
-                        : 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                        : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                     }`}>
                       {link.status}
                     </span>
                   </td>
                   <td className="py-3.5 text-right">
                     <button
-                      onClick={() => copyToClipboard(`https://lnk.pro/${link.shortCode}`, link.id)}
+                      onClick={() => copyToClipboard(`https://${link.domainName}/${link.shortCode}`, link.id)}
                       className={`p-2 rounded-lg border transition-all ${
                         copiedId === link.id
                           ? 'bg-emerald-600 text-white border-emerald-600'
