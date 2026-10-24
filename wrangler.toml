@@ -3,9 +3,6 @@ main = "src/worker.ts"
 compatibility_date = "2026-10-24"
 compatibility_flags = ["nodejs_compat"]
 
-# Cloudflare Pages build output directory
-pages_build_output_dir = "dist"
-
 # Cloudflare Workers with Static Assets
 [assets]
 directory = "./dist"
