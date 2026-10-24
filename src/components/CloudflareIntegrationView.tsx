@@ -517,18 +517,27 @@ location /api/ {
         </pre>
       </div>
 
-      {/* Cloudflare Pages Deployment Step-by-Step */}
+      {/* Cloudflare Deployment Step-by-Step */}
       <div className={`p-6 rounded-2xl border ${
         darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
       }`}>
-        <h2 className="text-base font-bold mb-3">Cloudflare Pages Deployment Commands</h2>
-        <div className="space-y-3 text-xs">
+        <h2 className="text-base font-bold mb-3">Cloudflare Deployment Commands (Pages &amp; Workers)</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
           <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-slate-300">
-            <div className="text-slate-500"># 1. Build the production React frontend</div>
+            <div className="text-emerald-400 font-semibold mb-1">Option A: Cloudflare Workers (Assets)</div>
+            <div className="text-slate-500"># 1. Build and deploy via Wrangler</div>
             <div className="text-indigo-400">npm run build</div>
-            <div className="text-slate-500 mt-2"># 2. Deploy directly to Cloudflare Pages with Wrangler</div>
-            <div className="text-indigo-400">npx wrangler pages deploy dist --project-name=linkpro-frontend</div>
-            <div className="text-slate-500 mt-2"># 3. Set the backend API URL variable in Cloudflare Pages dashboard</div>
+            <div className="text-indigo-400">npx wrangler deploy</div>
+            <div className="text-slate-500 mt-2"># 2. Set backend VPS secret</div>
+            <div className="text-indigo-400">npx wrangler secret put BACKEND_API_URL</div>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-slate-300">
+            <div className="text-cyan-400 font-semibold mb-1">Option B: Cloudflare Pages</div>
+            <div className="text-slate-500"># 1. Build frontend dist</div>
+            <div className="text-indigo-400">npm run build</div>
+            <div className="text-slate-500 mt-2"># 2. Deploy to Pages with functions proxy</div>
+            <div className="text-indigo-400">npx wrangler pages deploy dist --project-name=linkpro-enterprise-frontend</div>
+            <div className="text-slate-500 mt-2"># 3. Set backend secret in Pages</div>
             <div className="text-indigo-400">npx wrangler pages secret put BACKEND_API_URL</div>
           </div>
         </div>

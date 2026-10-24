@@ -1164,9 +1164,19 @@ Navigate to \`http://YOUR_VPS_IP\` to test database connection, apply enterprise
     category: 'config',
     description: 'Cloudflare Pages/Workers project configuration file.',
     content: `name = "linkpro-enterprise-frontend"
+main = "src/worker.ts"
 compatibility_date = "2026-10-24"
 compatibility_flags = ["nodejs_compat"]
+
+# Cloudflare Pages build output directory
 pages_build_output_dir = "dist"
+
+# Cloudflare Workers with Static Assets
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "single-page-application"
 
 [vars]
 BACKEND_API_URL = "https://api.lnk.pro"
