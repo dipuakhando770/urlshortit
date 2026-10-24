@@ -42,6 +42,7 @@ import { RedirectSandboxView } from './components/RedirectSandboxView';
 import { CloudflareIntegrationView } from './components/CloudflareIntegrationView';
 import { Footer } from './components/Footer';
 import { apiClient } from './services/apiClient';
+import { vpsShortenerService } from './services/vpsShortenerService';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -63,87 +64,58 @@ export default function App() {
   const currentPackage = packages.find(p => p.id === currentUser.packageId) || packages[0];
   const userSubscription = subscriptions.find(s => s.userId === currentUser.id);
 
-  // Strict 5-Step Domain Permission & Authoritative Backend Pipeline
-  const handleAddLink = async (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string): Promise<{ success: boolean; error?: string }> => {
-    // 1. Account state check
-    if (currentUser.status !== 'active') {
-      return { success: false, error: 'Your account is currently suspended or disabled. Link creation is blocked.' };
+  // Two-Stage Sequential URL Shortening Architecture
+  // Stage 1: Existing Frontend Branded Shortener
+  // Stage 2: Authoritative Ubuntu VPS shorten.php API
+  const handleAddLink = async (
+    domainId: string, 
+    originalUrl: string, 
+    customAlias?: string, 
+    title?: string, 
+    description?: string,
+    existingStage1Url?: string
+  ): Promise<{ 
+    success: boolean; 
+    error?: string; 
+    finalUrl?: string; 
+    stage1Url?: string;
+    stage?: 'stage1' | 'stage2';
+  }> => {
+    // 1. Input Validation: Only HTTP and HTTPS permitted
+    try {
+      const parsed = new URL(originalUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return { success: false, error: 'Original destination URL must be a valid HTTP or HTTPS address.', stage: 'stage1' };
+      }
+    } catch {
+      return { success: false, error: 'Malformed URL. Please enter a valid URL beginning with http:// or https://', stage: 'stage1' };
     }
 
-    // 2. Fetch Domain
+    // 2. Account & Subscription State Checks
+    if (currentUser.status !== 'active') {
+      return { success: false, error: 'Your account is suspended or disabled. Link creation is blocked.', stage: 'stage1' };
+    }
+
     const domain = domains.find(d => d.id === domainId);
     if (!domain) {
-      return { success: false, error: 'Target short-link domain does not exist.' };
+      return { success: false, error: 'Target short-link domain does not exist.', stage: 'stage1' };
     }
 
     if (!domain.isVerified) {
-      return { success: false, error: `Domain '${domain.domainName}' is pending DNS TXT verification. Unverified domains cannot be used.` };
+      return { success: false, error: `Domain '${domain.domainName}' is pending DNS TXT verification. Unverified domains cannot be used.`, stage: 'stage1' };
     }
 
     if (domain.status !== 'active') {
-      return { success: false, error: `Domain '${domain.domainName}' is currently inactive or suspended by administrator.` };
+      return { success: false, error: `Domain '${domain.domainName}' is currently inactive or suspended.`, stage: 'stage1' };
     }
 
-    // 3. Attempt Live Authoritative VPS Backend API Call
-    try {
-      const apiRes = await apiClient.createShortLink({
-        domain_id: domainId,
-        original_url: originalUrl,
-        custom_alias: customAlias,
-        title,
-        description
-      });
-
-      if (apiRes.success && apiRes.data?.short_url) {
-        // Backend successfully created the short link!
-        // The frontend renders the exact short_url returned by the backend, never guessing.
-        const backendData = apiRes.data;
-        const newLink: LinkItem = {
-          id: backendData.id || ('lnk_' + Date.now()),
-          domainId: domain.id,
-          domainName: backendData.domain_name || domain.domainName,
-          originalUrl: backendData.original_url || originalUrl,
-          shortCode: backendData.short_code,
-          shortUrl: backendData.short_url,
-          title: title || originalUrl.replace(/^https?:\/\//, '').split('/')[0],
-          description: description || '',
-          clicks: 0,
-          createdAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          status: 'active',
-          userId: currentUser.id,
-          redirectType: '302'
-        };
-
-        setLinks([newLink, ...links]);
-        setDomains(domains.map(d => d.id === domain.id ? { ...d, totalLinksCount: d.totalLinksCount + 1 } : d));
-
-        const newLog: AuditLog = {
-          id: 'aud_' + Date.now(),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          action: `Backend API created short URL ${backendData.short_url} -> ${originalUrl.substring(0, 30)}...`,
-          ip: '192.168.1.1',
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
-        };
-        setAuditLogs([newLog, ...auditLogs]);
-
-        return { success: true };
-      } else if (apiRes.error && apiRes.error.code !== 'NETWORK_ERROR' && apiRes.error.code !== 'REQUEST_TIMEOUT') {
-        // Real validation or quota error returned from the backend
-        return { success: false, error: `Backend API Error: ${apiRes.error.message}` };
-      }
-    } catch {
-      // In offline / preview fallback, continue to client validation
-    }
-
-    // Fallback: Local authoritative simulation when VPS is not yet running
-    // Check Explicit User-Level Denial (Absolute Precedence)
+    // Explicit User-Level Denial check
     const explicitPerm = permissions.find(p => p.userId === currentUser.id && p.domainId === domain.id);
     if (explicitPerm && !explicitPerm.isAllowed) {
-      return { success: false, error: `Domain Access Denied: Administrator has explicitly denied your account access to '${domain.domainName}'.` };
+      return { success: false, error: `Domain Access Denied: Administrator has explicitly denied your account access to '${domain.domainName}'.`, stage: 'stage1' };
     }
 
-    // Check Domain Permission Authorization (Explicit Grant / Unlimited Domains / Package Tier)
+    // Permission authorization
     const hasExplicitAllow = explicitPerm && explicitPerm.isAllowed;
     const hasUnlimitedDomainAccess = currentUser.hasAllDomainsAccess || currentPackage.hasAllDomainsAccess;
     const isDomainOwner = domain.userId === currentUser.id;
@@ -152,7 +124,8 @@ export default function App() {
     if (!hasExplicitAllow && !hasUnlimitedDomainAccess && !isDomainOwner && !isGlobalAndPaid) {
       return { 
         success: false, 
-        error: `Domain Access Denied: '${domain.domainName}' is not included in your current subscription plan (${currentPackage.name}). Please upgrade.` 
+        error: `Domain Access Denied: '${domain.domainName}' is not included in your current subscription plan (${currentPackage.name}). Please upgrade.`,
+        stage: 'stage1'
       };
     }
 
@@ -161,32 +134,58 @@ export default function App() {
     if (currentPackage.maxLinksQuota !== -1 && userLinks.length >= currentPackage.maxLinksQuota) {
       return { 
         success: false, 
-        error: `Subscription limit reached! Your plan (${currentPackage.name}) allows a maximum of ${currentPackage.maxLinksQuota} short links.` 
+        error: `Subscription limit reached! Your plan (${currentPackage.name}) allows a maximum of ${currentPackage.maxLinksQuota} short links.`,
+        stage: 'stage1'
       };
     }
 
-    // Check custom alias permission
     if (customAlias && customAlias.trim() && !currentPackage.allowCustomAlias && currentUser.role !== 'admin') {
-      return { success: false, error: `Custom short aliases require the Starter, Pro, or Business subscription tier.` };
+      return { success: false, error: 'Custom short aliases require a paid subscription tier.', stage: 'stage1' };
     }
 
-    // Short Code Collision Check on this specific domain
-    const shortCode = customAlias && customAlias.trim() 
-      ? customAlias.trim().replace(/[^a-zA-Z0-9_-]/g, '')
-      : Math.random().toString(36).substring(2, 8);
+    // --- STAGE 1: EXISTING FRONTEND SHORTENER ---
+    let stage1ShortUrl = existingStage1Url;
+    let shortCode = '';
 
-    const isDuplicate = links.some(l => l.domainId === domain.id && l.shortCode.toLowerCase() === shortCode.toLowerCase());
-    if (isDuplicate) {
-      return { success: false, error: `Short code '/${shortCode}' is already taken on domain '${domain.domainName}'. Please choose a different code.` };
+    if (!stage1ShortUrl) {
+      shortCode = customAlias && customAlias.trim() 
+        ? customAlias.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+        : Math.random().toString(36).substring(2, 8);
+
+      const isDuplicate = links.some(l => l.domainId === domain.id && l.shortCode.toLowerCase() === shortCode.toLowerCase());
+      if (isDuplicate) {
+        return { success: false, error: `Short code '/${shortCode}' is already taken on domain '${domain.domainName}'. Please choose a different code.`, stage: 'stage1' };
+      }
+
+      stage1ShortUrl = `https://${domain.domainName}/${shortCode}`;
     }
 
+    // --- STAGE 2: CALL UBUNTU VPS shorten.php ---
+    // The VPS backend receives { short_url: stage1ShortUrl, original_url: originalUrl }
+    const stage2Res = await vpsShortenerService.callVpsShorten(stage1ShortUrl, originalUrl);
+
+    if (!stage2Res.success || !stage2Res.finalShortUrl) {
+      // Stage 2 failed: Never display a fabricated final URL if Stage 2 fails!
+      return {
+        success: false,
+        error: stage2Res.error?.message || 'VPS Backend /shorten.php failed to generate the final short URL.',
+        stage: 'stage2',
+        stage1Url: stage1ShortUrl
+      };
+    }
+
+    const finalShortUrl = stage2Res.finalShortUrl;
+    const finalCode = stage2Res.code || shortCode;
+
+    // The final URL returned by the VPS backend is the ONLY URL presented as final result
     const newLink: LinkItem = {
-      id: 'lnk_' + Date.now(),
+      id: stage2Res.id || ('lnk_' + Date.now()),
       domainId: domain.id,
       domainName: domain.domainName,
-      originalUrl,
-      shortCode,
-      shortUrl: `https://${domain.domainName}/${shortCode}`,
+      originalUrl, // Must remain original long URL
+      shortCode: finalCode,
+      shortUrl: finalShortUrl, // ONLY the backend-generated final URL is presented
+      stage1ShortUrl, // Preserved for transparency
       title: title || originalUrl.replace(/^https?:\/\//, '').split('/')[0],
       description: description || '',
       clicks: 0,
@@ -197,22 +196,23 @@ export default function App() {
     };
 
     setLinks([newLink, ...links]);
-
-    // Update domain link counter
     setDomains(domains.map(d => d.id === domain.id ? { ...d, totalLinksCount: d.totalLinksCount + 1 } : d));
 
-    // Audit Log
     const newLog: AuditLog = {
       id: 'aud_' + Date.now(),
       userId: currentUser.id,
       userName: currentUser.name,
-      action: `Created new short URL https://${domain.domainName}/${shortCode} pointing to ${originalUrl.substring(0, 30)}...`,
+      action: `Sequential Shortener: [Stage 1: ${stage1ShortUrl}] -> [Stage 2 VPS Final: ${finalShortUrl}] -> ${originalUrl.substring(0, 30)}...`,
       ip: '192.168.1.1',
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
     };
     setAuditLogs([newLog, ...auditLogs]);
 
-    return { success: true };
+    return { 
+      success: true, 
+      finalUrl: finalShortUrl, 
+      stage1Url: stage1ShortUrl 
+    };
   };
 
   const handleDeleteLink = (id: string) => {

@@ -98,9 +98,10 @@ export interface LinkItem {
   id: string;
   domainId: string;
   domainName: string;
-  originalUrl: string;
+  originalUrl: string; // The user's original long URL
   shortCode: string;
-  shortUrl: string;
+  shortUrl: string; // The final short URL returned by VPS backend
+  stage1ShortUrl?: string; // The intermediate Stage 1 branded short URL
   title?: string;
   description?: string;
   clicks: number;
@@ -112,6 +113,24 @@ export interface LinkItem {
   lastClickedAt?: string;
   redirectType: '302' | '301';
 }
+
+export interface VpsShortenRequest {
+  short_url: string; // The Stage 1 short URL
+  original_url: string; // The user's original long URL
+}
+
+export interface VpsShortenResponse {
+  error: number; // 0 = success, >0 = error
+  shorturl?: string;
+  short_url?: string;
+  code?: string;
+  id?: string;
+  msg?: string;
+  message?: string;
+}
+
+export type ShorteningStage = 'idle' | 'validating' | 'stage1_generating' | 'stage2_vps_dispatch' | 'completed' | 'error';
+
 
 export interface ClickEvent {
   id: string;

@@ -14,7 +14,12 @@ import {
   Globe,
   Lock,
   Layers,
-  ShieldCheck
+  ShieldCheck,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  ArrowDown,
+  RotateCcw
 } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
 import {
@@ -50,7 +55,20 @@ interface DashboardViewProps {
   settings: AppSettings;
   darkMode: boolean;
   language: 'bn' | 'en';
-  onAddLink: (domainId: string, originalUrl: string, customAlias?: string, title?: string, description?: string) => { success: boolean; error?: string } | Promise<{ success: boolean; error?: string }>;
+  onAddLink: (
+    domainId: string, 
+    originalUrl: string, 
+    customAlias?: string, 
+    title?: string, 
+    description?: string,
+    existingStage1Url?: string
+  ) => Promise<{ 
+    success: boolean; 
+    error?: string; 
+    finalUrl?: string; 
+    stage1Url?: string; 
+    stage?: 'stage1' | 'stage2';
+  }>;
   onNavigateLinks: () => void;
   onNavigateDomains: () => void;
   onNavigateBilling: () => void;
@@ -75,9 +93,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [originalUrl, setOriginalUrl] = useState('');
   const [customAlias, setCustomAlias] = useState('');
   const [title, setTitle] = useState('');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [shorteningStage, setShorteningStage] = useState<'idle' | 'stage1' | 'stage2' | 'completed' | 'error'>('idle');
+  const [createdResult, setCreatedResult] = useState<{ finalUrl: string; stage1Url: string } | null>(null);
+  const [stage2FailedStage1Url, setStage2FailedStage1Url] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const totalClicks = links.reduce((sum, l) => sum + l.clicks, 0);
   const activeLinks = links.filter(l => l.status === 'active').length;
@@ -85,25 +106,63 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const currentPackage = packages.find(p => p.id === currentUser.packageId) || packages[0];
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreate = async (e?: React.FormEvent, retryStage1Url?: string) => {
+    if (e) e.preventDefault();
     setErrorMsg(null);
+    setSuccessMessage(null);
+
     if (!originalUrl.trim()) {
       setErrorMsg(language === 'bn' ? 'অনুগ্রহ করে একটি বৈধ ইউআরএল দিন।' : 'Please enter a valid URL.');
       return;
     }
 
-    const result = await onAddLink(selectedDomainId, originalUrl, customAlias, title, 'Created from Dashboard Quick Shortener');
+    if (retryStage1Url) {
+      setShorteningStage('stage2');
+    } else {
+      setShorteningStage('stage1');
+    }
+
+    // Two-stage sequential URL-shortening execution
+    const result = await onAddLink(
+      selectedDomainId, 
+      originalUrl, 
+      customAlias, 
+      title, 
+      'Created from Dashboard Quick Shortener',
+      retryStage1Url
+    );
+
     if (!result.success) {
+      setShorteningStage('error');
       setErrorMsg(result.error || 'Failed to create short link.');
+      if (result.stage === 'stage2' && result.stage1Url) {
+        setStage2FailedStage1Url(result.stage1Url);
+      }
       return;
     }
 
+    setShorteningStage('completed');
+    const finalUrl = result.finalUrl || '';
+    const stage1Url = result.stage1Url || '';
+
+    setCreatedResult({
+      finalUrl,
+      stage1Url
+    });
+
+    setStage2FailedStage1Url(null);
+    setSuccessMessage(language === 'bn' ? 'সফলভাবে ভিপিএস ফাইনাল শর্ট লিংক তৈরি হয়েছে!' : 'Final short link successfully created by VPS backend!');
+  };
+
+  const handleResetForm = () => {
     setOriginalUrl('');
     setCustomAlias('');
     setTitle('');
-    setSuccessMessage(language === 'bn' ? 'সফলভাবে ব্র্যান্ডেড শর্ট লিংক তৈরি করা হয়েছে!' : 'Branded short link generated successfully!');
-    setTimeout(() => setSuccessMessage(null), 4000);
+    setCreatedResult(null);
+    setShorteningStage('idle');
+    setErrorMsg(null);
+    setSuccessMessage(null);
+    setStage2FailedStage1Url(null);
   };
 
   const copyToClipboard = (text: string, id: string) => {
@@ -208,94 +267,248 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Quick Shortener & Analytics Chart Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Quick Shortener Card */}
-        <div className={`p-6 rounded-2xl border lg:col-span-1 ${
+        <div className={`p-6 rounded-2xl border lg:col-span-1 flex flex-col justify-between ${
           darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
         }`}>
-          <div className="flex items-center space-x-2 mb-4">
-            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500">
-              <Plus className="w-4 h-4" />
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <h2 className="text-base font-bold">
+                  {language === 'bn' ? 'দুই-ধাপ সিকোয়েন্সিয়াল ইউআরএল শর্টনার' : 'Two-Stage Sequential Shortener'}
+                </h2>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                VPS Final /shorten.php
+              </span>
             </div>
-            <h2 className="text-base font-bold">
-              {language === 'bn' ? 'ব্র্যান্ডেড শর্ট লিংক তৈরি করুন' : 'Create Branded Link'}
-            </h2>
+
+            {/* Error Message with Stage 2 Retry Option */}
+            {errorMsg && (
+              <div className="mb-4 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs font-medium space-y-2 animate-fadeIn">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">
+                      {shorteningStage === 'error' && stage2FailedStage1Url ? 'Stage 2 (VPS Backend) Failed:' : 'Shortening Error:'}
+                    </span>{' '}
+                    <span>{errorMsg}</span>
+                  </div>
+                </div>
+
+                {stage2FailedStage1Url && (
+                  <div className="pt-2 border-t border-rose-500/20 flex flex-col sm:flex-row items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-400 font-mono truncate max-w-full">
+                      Preserved Stage 1: {stage2FailedStage1Url}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCreate(undefined, stage2FailedStage1Url)}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center space-x-1.5 shrink-0 shadow-sm"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{language === 'bn' ? 'শুধুমাত্র স্টেজ ২ পুনরায় চেষ্টা করুন' : 'Retry Stage 2 Only'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Success Notification Banner */}
+            {successMessage && !createdResult && (
+              <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium animate-fadeIn flex items-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{successMessage}</span>
+              </div>
+            )}
+
+            {/* SUCCESS VIEW: Prominently display ONLY the VPS Backend-generated Final URL */}
+            {createdResult ? (
+              <div className="space-y-4 animate-fadeIn">
+                <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-950/60 to-slate-900 border border-indigo-500/30 text-white space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wider flex items-center space-x-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{language === 'bn' ? 'ভিপিএস ফাইনাল শর্ট ইউআরএল' : 'Authoritative Final Short URL'}</span>
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-semibold">
+                      error: 0 (Live)
+                    </span>
+                  </div>
+
+                  {/* The primary final URL returned by VPS backend */}
+                  <div className="p-3 rounded-lg bg-black/50 border border-indigo-500/30 font-mono text-sm font-bold text-indigo-300 break-all select-all flex items-center justify-between gap-2">
+                    <span className="truncate">{createdResult.finalUrl}</span>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(createdResult.finalUrl, 'result_final')}
+                      className="p-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white shrink-0 transition-all"
+                      title="Copy Final URL"
+                    >
+                      {copiedId === 'result_final' ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center space-x-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(createdResult.finalUrl, 'result_btn')}
+                      className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-indigo-600/20"
+                    >
+                      {copiedId === 'result_btn' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedId === 'result_btn' ? 'Copied Final URL!' : 'Copy Final Link'}</span>
+                    </button>
+                    <a
+                      href={createdResult.finalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center space-x-1 transition-all"
+                      title="Open in new window"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>{language === 'bn' ? 'ওপেন' : 'Open'}</span>
+                    </a>
+                  </div>
+                </div>
+
+                {/* Transparency breakdown of the 2 sequential stages */}
+                <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/40 text-xs space-y-2">
+                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                    {language === 'bn' ? 'সিকোয়েন্সিয়াল স্টেপ পর্যবেক্ষণ' : 'Sequential Pipeline Trace'}
+                  </div>
+                  <div className="space-y-1.5 text-[11px] font-mono">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>1. Destination:</span>
+                      <span className="truncate max-w-[170px] text-slate-300" title={originalUrl}>{originalUrl}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>2. Stage 1 Branded:</span>
+                      <span className="truncate max-w-[170px] text-indigo-400">{createdResult.stage1Url}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>3. Stage 2 VPS Final:</span>
+                      <span className="truncate max-w-[170px] text-emerald-400 font-bold">{createdResult.finalUrl}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleResetForm}
+                  className="w-full py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold flex items-center justify-center space-x-2 transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{language === 'bn' ? 'আরেকটি নতুন শর্ট লিংক তৈরি করুন' : 'Shorten Another URL'}</span>
+                </button>
+              </div>
+            ) : (
+              /* FORM VIEW: Two-Stage Creation Form */
+              <form onSubmit={handleCreate} className="space-y-4">
+                {/* Visual Step Progress Indicator when processing */}
+                {(shorteningStage === 'stage1' || shorteningStage === 'stage2') && (
+                  <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-xs space-y-2 animate-pulse">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-indigo-400">
+                      <span>{language === 'bn' ? 'সিকোয়েন্সিয়াল প্রসেসিং চলমান...' : 'Sequential Pipeline Active'}</span>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                    </div>
+                    <div className="space-y-1 text-[11px]">
+                      <div className="flex items-center space-x-2">
+                        <span className={`w-2 h-2 rounded-full ${shorteningStage === 'stage1' ? 'bg-indigo-400 animate-ping' : 'bg-emerald-400'}`}></span>
+                        <span className={shorteningStage === 'stage1' ? 'text-indigo-300 font-semibold' : 'text-slate-400 line-through'}>
+                          Stage 1: Generate branded frontend short code
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className={`w-2 h-2 rounded-full ${shorteningStage === 'stage2' ? 'bg-emerald-400 animate-ping' : 'bg-slate-600'}`}></span>
+                        <span className={shorteningStage === 'stage2' ? 'text-emerald-300 font-semibold' : 'text-slate-500'}>
+                          Stage 2: Dispatching payload to Ubuntu VPS /shorten.php
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Domain Selector */}
+                <div>
+                  <label className="block text-xs font-medium mb-1.5 text-slate-400">
+                    {language === 'bn' ? 'ব্র্যান্ডেড শর্ট ডোমেইন (স্টেজ ১)' : 'Branded Domain (Stage 1)'}
+                  </label>
+                  <select
+                    value={selectedDomainId}
+                    onChange={(e) => setSelectedDomainId(e.target.value)}
+                    disabled={shorteningStage === 'stage1' || shorteningStage === 'stage2'}
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-none font-mono ${
+                      darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                    }`}
+                  >
+                    {domains.filter(d => d.isVerified).map((d) => (
+                      <option key={d.id} value={d.id}>
+                        https://{d.domainName}/
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1.5 text-slate-400">
+                    {language === 'bn' ? 'মূল ইউআরএল (ডেসটিনেশন) *' : 'Original Destination URL *'}
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://example.com/very/long/path"
+                    value={originalUrl}
+                    onChange={(e) => setOriginalUrl(e.target.value)}
+                    disabled={shorteningStage === 'stage1' || shorteningStage === 'stage2'}
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none transition-all ${
+                      darkMode 
+                        ? 'bg-slate-800 border-slate-700 text-white focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-600'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1.5 text-slate-400">
+                    {language === 'bn' ? 'কাস্টম শর্ট কোড (ঐচ্ছিক)' : 'Custom Alias / Code (Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. promo2026"
+                    value={customAlias}
+                    onChange={(e) => setCustomAlias(e.target.value)}
+                    disabled={shorteningStage === 'stage1' || shorteningStage === 'stage2'}
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none font-mono ${
+                      darkMode 
+                        ? 'bg-slate-800 border-slate-700 text-white focus:border-indigo-500' 
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-600'
+                    }`}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={shorteningStage === 'stage1' || shorteningStage === 'stage2'}
+                  className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium text-xs shadow-md shadow-indigo-500/25 transition-all flex items-center justify-center space-x-2"
+                >
+                  {shorteningStage === 'stage1' || shorteningStage === 'stage2' ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>{shorteningStage === 'stage1' ? 'Executing Stage 1...' : 'Calling VPS shorten.php (Stage 2)...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>{language === 'bn' ? 'সিকোয়েন্সিয়াল শর্ট লিংক তৈরি করুন' : 'Generate Final Short URL'}</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
           </div>
-
-          {successMessage && (
-            <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium animate-fadeIn">
-              {successMessage}
-            </div>
-          )}
-
-          {errorMsg && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-medium animate-fadeIn">
-              {errorMsg}
-            </div>
-          )}
-
-          <form onSubmit={handleCreate} className="space-y-4">
-            {/* Domain Selector */}
-            <div>
-              <label className="block text-xs font-medium mb-1.5 text-slate-400">
-                {language === 'bn' ? 'ডোমেইন নির্বাচন করুন' : 'Short Domain'}
-              </label>
-              <select
-                value={selectedDomainId}
-                onChange={(e) => setSelectedDomainId(e.target.value)}
-                className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-none font-mono ${
-                  darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
-                }`}
-              >
-                {domains.filter(d => d.isVerified).map((d) => (
-                  <option key={d.id} value={d.id}>
-                    https://{d.domainName}/
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5 text-slate-400">
-                {language === 'bn' ? 'মূল ইউআরএল (ডেসটিনেশন)' : 'Original URL'}
-              </label>
-              <input
-                type="url"
-                required
-                placeholder="https://example.com/very/long/path"
-                value={originalUrl}
-                onChange={(e) => setOriginalUrl(e.target.value)}
-                className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none transition-all ${
-                  darkMode 
-                    ? 'bg-slate-800 border-slate-700 text-white focus:border-indigo-500' 
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-600'
-                }`}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5 text-slate-400">
-                {language === 'bn' ? 'কাস্টম শর্ট কোড (ঐচ্ছিক)' : 'Custom Alias (Optional)'}
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. promo2026"
-                value={customAlias}
-                onChange={(e) => setCustomAlias(e.target.value)}
-                className={`w-full px-3.5 py-2.5 rounded-xl border text-sm outline-none font-mono ${
-                  darkMode 
-                    ? 'bg-slate-800 border-slate-700 text-white focus:border-indigo-500' 
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-600'
-                }`}
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-500/25 transition-all flex items-center justify-center space-x-2"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>{language === 'bn' ? 'শর্ট লিংক জেনারেট করুন' : 'Generate Short URL'}</span>
-            </button>
-          </form>
         </div>
 
         {/* Analytics Chart Card */}
@@ -327,9 +540,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
       }`}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-bold">
-            {language === 'bn' ? 'সাম্প্রতিক লিংকসমূহ' : 'Recent Links'}
-          </h2>
+          <div>
+            <h2 className="text-base font-bold">
+              {language === 'bn' ? 'সাম্প্রতিক লিংকসমূহ (ফাইনাল ভিপিএস ইউআরএল)' : 'Recent Authoritative Links (VPS Backend)'}
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {language === 'bn' ? 'প্রতিটি লিংক উবুন্টু ভিপিএস /shorten.php দ্বারা যাচাইকৃত।' : 'Authoritative links generated by Ubuntu VPS /shorten.php with direct 302 redirect.'}
+            </p>
+          </div>
           <button
             onClick={onNavigateLinks}
             className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1"
@@ -343,7 +561,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <table className="w-full text-left text-sm">
             <thead>
               <tr className={`border-b text-xs font-semibold text-slate-400 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-                <th className="pb-3">{language === 'bn' ? 'ডোমেইন ও কোড' : 'Branded URL'}</th>
+                <th className="pb-3">{language === 'bn' ? 'ফাইনাল শর্ট ইউআরএল' : 'Final Short URL (VPS Authoritative)'}</th>
                 <th className="pb-3">{language === 'bn' ? 'মূল ডেসটিনেশন' : 'Destination'}</th>
                 <th className="pb-3">{language === 'bn' ? 'ক্লিক' : 'Clicks'}</th>
                 <th className="pb-3">{language === 'bn' ? 'স্ট্যাটাস' : 'Status'}</th>
@@ -351,46 +569,62 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
-              {links.slice(0, 5).map((link) => (
-                <tr key={link.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3.5 pr-4">
-                    <div className="font-semibold text-sm">{link.title || link.shortCode}</div>
-                    <span className="text-xs font-mono text-indigo-400 font-medium">
-                      {link.domainName}/{link.shortCode}
-                    </span>
-                  </td>
-                  <td className="py-3.5 pr-4 max-w-xs truncate text-slate-400 text-xs font-mono">
-                    {link.originalUrl}
-                  </td>
-                  <td className="py-3.5 pr-4 font-semibold text-emerald-400">
-                    {link.clicks}
-                  </td>
-                  <td className="py-3.5 pr-4">
-                    <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
-                      link.status === 'active' 
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                        : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                    }`}>
-                      {link.status}
-                    </span>
-                  </td>
-                  <td className="py-3.5 text-right">
-                    <button
-                      onClick={() => copyToClipboard(`https://${link.domainName}/${link.shortCode}`, link.id)}
-                      className={`p-2 rounded-lg border transition-all ${
-                        copiedId === link.id
-                          ? 'bg-emerald-600 text-white border-emerald-600'
-                          : darkMode 
-                            ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' 
-                            : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
-                      }`}
-                      title="Copy Short URL"
-                    >
-                      {copiedId === link.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {links.slice(0, 5).map((link) => {
+                const displayUrl = link.shortUrl || `https://${link.domainName}/${link.shortCode}`;
+                return (
+                  <tr key={link.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                    <td className="py-3.5 pr-4">
+                      <div className="font-semibold text-sm">{link.title || link.shortCode}</div>
+                      <div className="flex items-center space-x-2 mt-0.5">
+                        <a 
+                          href={displayUrl} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="text-xs font-mono text-indigo-400 hover:text-indigo-300 font-bold flex items-center space-x-1"
+                        >
+                          <span>{displayUrl}</span>
+                          <ExternalLink className="w-3 h-3 ml-1" />
+                        </a>
+                      </div>
+                      {link.stage1ShortUrl && (
+                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                          Stage 1: {link.stage1ShortUrl}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3.5 pr-4 max-w-xs truncate text-slate-400 text-xs font-mono" title={link.originalUrl}>
+                      {link.originalUrl}
+                    </td>
+                    <td className="py-3.5 pr-4 font-semibold text-emerald-400">
+                      {link.clicks}
+                    </td>
+                    <td className="py-3.5 pr-4">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
+                        link.status === 'active' 
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                      }`}>
+                        {link.status}
+                      </span>
+                    </td>
+                    <td className="py-3.5 text-right">
+                      <button
+                        onClick={() => copyToClipboard(displayUrl, link.id)}
+                        className={`p-2 rounded-lg border transition-all ${
+                          copiedId === link.id
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : darkMode 
+                              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' 
+                              : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                        }`}
+                        title="Copy Authoritative Short URL"
+                      >
+                        {copiedId === link.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

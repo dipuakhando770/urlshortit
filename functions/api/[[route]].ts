@@ -24,8 +24,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   // Authoritative backend base URL configured in Cloudflare Pages Environment Variables
   const backendBaseUrl = (env.BACKEND_API_URL || 'https://api.lnk.pro').replace(/\/+$/, '');
 
-  // Extract the route path (e.g. /api/links -> /api/links)
-  const targetPath = url.pathname;
+  // Extract the route path (e.g. /api/links -> /api/links, /api/shorten.php -> /shorten.php)
+  let targetPath = url.pathname;
+  if (targetPath === '/api/shorten.php') {
+    targetPath = '/shorten.php';
+  }
   const targetUrl = new URL(`${backendBaseUrl}${targetPath}${url.search}`);
 
   // Handle CORS Preflight (OPTIONS)

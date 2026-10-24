@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient, BackendConfig } from '../services/apiClient';
+import { vpsShortenerService } from '../services/vpsShortenerService';
 import { 
   Cloud, 
   Server, 
@@ -15,7 +16,9 @@ import {
   AlertTriangle,
   Sliders,
   ArrowRight,
-  Code2
+  Code2,
+  Send,
+  HelpCircle
 } from 'lucide-react';
 
 interface CloudflareIntegrationViewProps {
@@ -38,6 +41,20 @@ export const CloudflareIntegrationView: React.FC<CloudflareIntegrationViewProps>
   } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Stage 2 /shorten.php Diagnostics State
+  const [mockFallbackActive, setMockFallbackActive] = useState<boolean>(vpsShortenerService.isMockFallbackEnabled());
+  const [stage2Testing, setStage2Testing] = useState(false);
+  const [testStage1Url, setTestStage1Url] = useState('https://lnk.pro/preview_test');
+  const [testOriginalUrl, setTestOriginalUrl] = useState('https://github.com/torvalds/linux');
+  const [stage2TestResult, setStage2TestResult] = useState<{
+    reachable: boolean;
+    latencyMs: number;
+    requestPayload: any;
+    responseStatus?: number;
+    responseBody?: any;
+    error?: string;
+  } | null>(null);
 
   const presets = [
     { label: 'Production API Domain', url: 'https://api.lnk.pro' },
@@ -73,6 +90,22 @@ export const CloudflareIntegrationView: React.FC<CloudflareIntegrationViewProps>
       setTestResult(res);
     } finally {
       setTesting(false);
+    }
+  };
+
+  const toggleMockFallback = (enabled: boolean) => {
+    vpsShortenerService.setMockFallbackEnabled(enabled);
+    setMockFallbackActive(enabled);
+  };
+
+  const runStage2Test = async () => {
+    setStage2Testing(true);
+    setStage2TestResult(null);
+    try {
+      const res = await vpsShortenerService.testVpsShortenEndpoint(testStage1Url, testOriginalUrl);
+      setStage2TestResult(res);
+    } finally {
+      setStage2Testing(false);
     }
   };
 
@@ -284,6 +317,133 @@ location /api/ {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Stage 2 VPS /shorten.php Diagnostic Suite */}
+      <div className={`p-6 rounded-2xl border ${
+        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center space-x-2">
+            <Zap className="w-5 h-5 text-indigo-500" />
+            <div>
+              <h2 className="text-base font-bold">
+                {language === 'bn' ? 'স্টেজ ২ ভিপিএস shorten.php ডায়াগনস্টিক টেস্ট' : 'Stage 2 VPS /shorten.php Diagnostic Tester'}
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {language === 'bn' 
+                  ? 'উবুন্টু ভিপিএস-এ { short_url, original_url } পেলোড পাঠিয়ে টেস্ট করুন।' 
+                  : 'Directly dispatch { short_url, original_url } to your Ubuntu VPS endpoint and verify error: 0 response.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Mock Fallback Toggle */}
+          <div className="flex items-center space-x-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700 text-xs">
+            <div className="text-[11px] text-slate-300">
+              <span className="font-semibold">Local Offline Mock:</span>{' '}
+              <span className={mockFallbackActive ? 'text-amber-400 font-bold' : 'text-slate-500'}>
+                {mockFallbackActive ? 'Active' : 'Disabled (Live VPS Enforced)'}
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={mockFallbackActive}
+              onChange={(e) => toggleMockFallback(e.target.checked)}
+              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+              title="Toggle mock fallback for testing without VPS"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-xs font-medium mb-1 text-slate-400">
+              Stage 1 Short URL (short_url field)
+            </label>
+            <input
+              type="url"
+              value={testStage1Url}
+              onChange={(e) => setTestStage1Url(e.target.value)}
+              placeholder="https://lnk.pro/preview_test"
+              className="w-full px-3 py-2 rounded-xl border bg-slate-800 border-slate-700 text-xs font-mono text-white outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1 text-slate-400">
+              Original Long Destination URL (original_url field)
+            </label>
+            <input
+              type="url"
+              value={testOriginalUrl}
+              onChange={(e) => setTestOriginalUrl(e.target.value)}
+              placeholder="https://github.com/torvalds/linux"
+              className="w-full px-3 py-2 rounded-xl border bg-slate-800 border-slate-700 text-xs font-mono text-white outline-none focus:border-indigo-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] text-slate-400 font-mono">
+            POST {config.useProxy ? `${config.proxyEndpoint}/shorten.php` : `${config.baseUrl}/shorten.php`}
+          </div>
+
+          <button
+            type="button"
+            onClick={runStage2Test}
+            disabled={stage2Testing}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-500/25 flex items-center space-x-2 transition-all disabled:opacity-50"
+          >
+            <Send className={`w-3.5 h-3.5 ${stage2Testing ? 'animate-bounce' : ''}`} />
+            <span>{stage2Testing ? 'Dispatching to VPS...' : 'Test POST /shorten.php'}</span>
+          </button>
+        </div>
+
+        {/* Stage 2 Test Result View */}
+        {stage2TestResult && (
+          <div className={`mt-4 p-4 rounded-xl border text-xs font-mono space-y-2 animate-fadeIn ${
+            stage2TestResult.reachable 
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' 
+              : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 font-bold">
+                {stage2TestResult.reachable ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-rose-400" />
+                )}
+                <span>
+                  {stage2TestResult.reachable 
+                    ? `HTTP ${stage2TestResult.responseStatus || 200} OK — Stage 2 Validated` 
+                    : `Stage 2 Endpoint Test Failed`}
+                </span>
+              </div>
+              <span className="text-[11px] px-2 py-0.5 rounded bg-black/40">
+                Latency: {stage2TestResult.latencyMs} ms
+              </span>
+            </div>
+
+            {/* Request Payload Sent */}
+            <div className="p-2.5 rounded bg-black/50 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-slate-400 uppercase font-semibold">Sent JSON Request:</div>
+              <pre className="text-[11px] text-indigo-300 overflow-x-auto">
+                {JSON.stringify(stage2TestResult.requestPayload, null, 2)}
+              </pre>
+            </div>
+
+            {/* Received Response */}
+            <div className="p-2.5 rounded bg-black/50 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-slate-400 uppercase font-semibold">Received VPS Response:</div>
+              <pre className="text-[11px] overflow-x-auto text-emerald-300">
+                {typeof stage2TestResult.responseBody === 'object'
+                  ? JSON.stringify(stage2TestResult.responseBody, null, 2)
+                  : String(stage2TestResult.responseBody || stage2TestResult.error)}
+              </pre>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Cloudflare Pages Edge Function Code */}

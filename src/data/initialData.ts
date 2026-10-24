@@ -493,6 +493,86 @@ if ($uri === '/api/health') {
 }`
   },
   {
+    path: 'public/shorten.php',
+    name: 'shorten.php',
+    category: 'public',
+    description: 'Stage 2 VPS Final Shortener API endpoint. Receives Stage 1 short_url + original_url and generates authoritative final short URL.',
+    content: `<?php
+/**
+ * LinkPro Enterprise - Stage 2 VPS URL Shortener API
+ * Endpoint: POST /shorten.php
+ *
+ * Receives Stage 1 Short URL + Original Long URL and returns error: 0 and final short_url.
+ */
+
+declare(strict_types=1);
+require_once __DIR__ . '/../app/bootstrap.php';
+
+use App\\Services\\Database;
+
+// Handle CORS
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
+header("Access-Control-Allow-Origin: $origin");
+header("Access-Control-Allow-Credentials: true");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept");
+header('Content-Type: application/json');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(['error' => 1, 'msg' => 'Method Not Allowed. POST required.']);
+    exit;
+}
+
+$raw = file_get_contents('php://input');
+$input = json_decode($raw, true) ?: $_POST;
+
+$stage1Url = filter_var($input['short_url'] ?? '', FILTER_SANITIZE_URL);
+$originalUrl = filter_var($input['original_url'] ?? '', FILTER_SANITIZE_URL);
+
+if (!filter_var($stage1Url, FILTER_VALIDATE_URL) || !preg_match('/^https?:\\/\\//i', $stage1Url)) {
+    http_response_code(422);
+    echo json_encode(['error' => 2, 'msg' => 'Invalid or missing short_url (Stage 1 URL).']);
+    exit;
+}
+
+if (!filter_var($originalUrl, FILTER_VALIDATE_URL) || !preg_match('/^https?:\\/\\//i', $originalUrl)) {
+    http_response_code(422);
+    echo json_encode(['error' => 3, 'msg' => 'Invalid or missing original_url.']);
+    exit;
+}
+
+$db = Database::getInstance();
+
+// Generate unique Stage 2 final code on the primary domain
+$finalCode = strtolower(substr(bin2hex(random_bytes(4)), 0, 6));
+$finalShortUrl = "https://lnk.pro/" . $finalCode;
+
+$stmt = $db->prepare("
+    INSERT INTO links (id, domain_id, user_id, original_url, short_code, title, redirect_type, status, created_at)
+    VALUES (?, 'dom_1', 'usr_1', ?, ?, 'Final Stage 2 Short Link', '302', 'active', NOW())
+");
+$linkId = 'lnk_' . uniqid();
+$stmt->execute([$linkId, $originalUrl, $finalCode]);
+
+// Return standard contract: error: 0 and short_url/shorturl
+echo json_encode([
+    'error' => 0,
+    'short_url' => $finalShortUrl,
+    'shorturl' => $finalShortUrl,
+    'code' => $finalCode,
+    'id' => $linkId,
+    'stage1_url' => $stage1Url,
+    'original_url' => $originalUrl,
+    'msg' => 'Success'
+]);
+exit;`
+  },
+  {
     path: 'public/redirect.php',
     name: 'redirect.php',
     category: 'public',
