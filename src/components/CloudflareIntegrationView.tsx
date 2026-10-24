@@ -517,6 +517,36 @@ location /api/ {
         </pre>
       </div>
 
+      {/* Cloudflare CI/CD Pipeline Troubleshooting */}
+      <div className={`p-6 rounded-2xl border ${
+        darkMode ? 'bg-amber-950/30 border-amber-800/60' : 'bg-amber-50 border-amber-200 shadow-xs'
+      }`}>
+        <div className="flex items-center space-x-2 text-amber-500 mb-2">
+          <AlertTriangle className="w-5 h-5" />
+          <h2 className="text-base font-bold">Cloudflare CI Build Error Fix (Missing Entry-Point / Pages Warning)</h2>
+        </div>
+        <p className="text-xs text-amber-200/90 mb-3">
+          If your Cloudflare CI log shows <code className="bg-amber-900/50 px-1 py-0.5 rounded text-amber-300">▲ [WARNING] You ran wrangler deploy on a Pages project</code> followed by <code className="bg-amber-900/50 px-1 py-0.5 rounded text-amber-300">✘ [ERROR] Missing entry-point to Worker script or to assets directory</code>:
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
+            <div className="text-amber-400 font-bold mb-1">Fix 1: In Cloudflare Pages Dashboard (No git push needed)</div>
+            <p className="text-slate-400 font-sans mb-2">Go to <strong>Settings &gt; Builds &amp; deployments</strong>:</p>
+            <div className="text-slate-400 font-sans">1. <strong>Build command:</strong> <span className="text-emerald-400 font-mono">bun run build</span> (or <span className="text-emerald-400 font-mono">npm run build</span>)</div>
+            <div className="text-slate-400 font-sans">2. <strong>Build output directory:</strong> <span className="text-emerald-400 font-mono">dist</span></div>
+            <div className="text-slate-400 font-sans">3. <strong>Deploy command:</strong> <span className="text-rose-400 font-mono">LEAVE EMPTY</span> (Cloudflare Pages auto-deploys dist)</div>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
+            <div className="text-cyan-400 font-bold mb-1">Fix 2: If deploying via Workers with Static Assets</div>
+            <p className="text-slate-400 font-sans mb-2">Ensure your GitHub repository has the 4 updated files:</p>
+            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">wrangler.toml</span> (with <span className="text-indigo-300">main = "src/worker.ts"</span> and <span className="text-indigo-300">[assets]</span>)</div>
+            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">src/worker.ts</span> (Worker edge proxy and static asset server)</div>
+            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">package.json</span> (includes wrangler in devDependencies)</div>
+            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">vite.config.ts</span> (uses import.meta.dirname)</div>
+          </div>
+        </div>
+      </div>
+
       {/* Cloudflare Deployment Step-by-Step */}
       <div className={`p-6 rounded-2xl border ${
         darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
