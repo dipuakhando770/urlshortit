@@ -1,0 +1,6 @@
+{
+  "name": "LinkPro URL Shortener SaaS",
+  "description": "Professional URL Shortener SaaS Platform with Analytics, Admin Dashboard, Browser Installer, and Complete PHP/Nginx/MariaDB Package.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
