@@ -40,6 +40,7 @@ import { AdminView } from './components/AdminView';
 import { SourceCodeView } from './components/SourceCodeView';
 import { RedirectSandboxView } from './components/RedirectSandboxView';
 import { CloudflareIntegrationView } from './components/CloudflareIntegrationView';
+import { AuthModal } from './components/AuthModal';
 import { Footer } from './components/Footer';
 import { apiClient } from './services/apiClient';
 import { vpsShortenerService } from './services/vpsShortenerService';
@@ -60,6 +61,10 @@ export default function App() {
   const [clickEvents, setClickEvents] = useState<ClickEvent[]>(initialClickEvents);
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
+
+  // Authentication Modal State
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
 
   // Backend Health & Readiness State
   const [backendHealth, setBackendHealth] = useState<{
@@ -99,11 +104,12 @@ export default function App() {
   }, []);
 
   /**
-   * Sequential Shortening Flow:
-   * 1. Validate original URL.
-   * 2. Generate local Stage 1 URL.
-   * 3. Dispatch to Boss VPS API: POST /api/links/stage1
-   * 4. Save and return real Boss VPS short URL.
+   * Sequential Shortening Flow with Plan & Quota Enforcement:
+   * 1. Check user account active status.
+   * 2. Check plan link quota.
+   * 3. Validate original URL.
+   * 4. Dispatch to Boss VPS API: POST /api/links/stage1
+   * 5. Save and return real Boss VPS short URL.
    */
   const handleAddLink = async (
     domainId: string, 
@@ -120,7 +126,23 @@ export default function App() {
     originalUrl?: string;
     stage1Id?: number;
   }> => {
-    // 1. Input Validation: Only HTTP and HTTPS permitted
+    // 1. Account Status Check
+    if (currentUser.status !== 'active') {
+      return { success: false, error: 'Your account is suspended or disabled. Link creation is blocked.' };
+    }
+
+    // 2. Plan Quota Check
+    const userLinks = links.filter(l => l.userId === currentUser.id);
+    if (currentPackage.maxLinksQuota !== -1 && userLinks.length >= currentPackage.maxLinksQuota) {
+      return { 
+        success: false, 
+        error: language === 'bn' 
+          ? `আপনার প্ল্যান কোটা পূর্ণ হয়েছে (${currentPackage.name} প্ল্যানে সর্বোচ্চ ${currentPackage.maxLinksQuota} টি লিংক তৈরি করা যায়)। দয়া করে প্ল্যান আপগ্রেড করুন।`
+          : `Plan quota reached! Your current plan (${currentPackage.name}) allows a maximum of ${currentPackage.maxLinksQuota} links. Please upgrade your plan.`
+      };
+    }
+
+    // 3. Input Validation: Only HTTP and HTTPS permitted
     try {
       const parsed = new URL(originalUrl);
       if (!['http:', 'https:'].includes(parsed.protocol)) {
@@ -137,7 +159,7 @@ export default function App() {
     const domain = domains.find(d => d.id === domainId) || domains[0];
     const frontendStage1Url = `https://${domain.domainName}/${shortCode}`;
 
-    // Dispatch to Boss VPS API: POST /api/links/stage1
+    // 4. Dispatch to Boss VPS API: POST /api/links/stage1
     const vpsRes = await vpsShortenerService.callVpsShorten(frontendStage1Url, originalUrl);
 
     if (!vpsRes.success || !vpsRes.finalShortUrl) {
@@ -237,6 +259,16 @@ export default function App() {
       sslActive: true,
       verifiedAt: new Date().toISOString().replace('T', ' ').substring(0, 19)
     } : d));
+
+    const newLog: AuditLog = {
+      id: 'aud_' + Date.now(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      action: `DNS verified and SSL activated for custom domain ID ${domainId}`,
+      ip: '192.168.1.1',
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
+    };
+    setAuditLogs([newLog, ...auditLogs]);
   };
 
   const handleDeleteDomain = (domainId: string) => {
@@ -256,11 +288,18 @@ export default function App() {
         setDarkMode={setDarkMode}
         language={language}
         setLanguage={setLanguage}
-        onLogout={() => alert(language === 'bn' ? 'সফলভাবে লগআউট করা হয়েছে।' : 'Successfully logged out.')}
+        onLogout={() => {
+          setCurrentUser(initialUsers[1]); // switch to regular user on logout
+          setIsAuthModalOpen(true);
+        }}
         backendUrl={apiClient.getConfig().baseUrl}
         onOpenCloudflareTab={() => setActiveTab('cloudflare')}
         backendHealth={backendHealth}
         onRefreshHealth={checkBackendHealth}
+        onOpenAuthModal={(mode) => {
+          setAuthModalMode(mode);
+          setIsAuthModalOpen(true);
+        }}
       />
 
       {/* Main Body Layout */}
@@ -268,13 +307,20 @@ export default function App() {
         {/* Sidebar */}
         <Sidebar
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={(tab) => {
+            if (tab === 'admin' && currentUser.role !== 'admin') {
+              alert(language === 'bn' ? 'অ্যাক্সেস ডিনাইড: এই অপশনটি শুধুমাত্র অ্যাডামিনের জন্য সংরক্ষিত।' : 'Access Denied: Admin console is restricted to admin credentials.');
+              return;
+            }
+            setActiveTab(tab);
+          }}
           darkMode={darkMode}
           language={language}
           totalLinks={links.length}
           totalDomains={domains.filter(d => d.isVerified).length}
           totalClicks={links.reduce((sum, l) => sum + l.clicks, 0)}
           pendingOrdersCount={orders.filter(o => o.status === 'pending_review').length}
+          currentUser={currentUser}
         />
 
         {/* Content Area */}
@@ -349,13 +395,13 @@ export default function App() {
               onPurchasePackage={(pkg, method, trxRef, notes) => {
                 const newOrder: OrderRecord = {
                   id: 'ord_' + Date.now(),
-                  orderNumber: 'ORD-' + Math.floor(100000 + Math.random() * 900000),
+                  orderNumber: 'LP-2026-' + Math.floor(100000 + Math.random() * 900000),
                   userId: currentUser.id,
                   userName: currentUser.name,
                   packageId: pkg.id,
                   packageName: pkg.name,
                   amount: pkg.price,
-                  currency: 'BDT',
+                  currency: 'USD',
                   paymentMethod: method,
                   transactionReference: trxRef,
                   status: 'pending_review',
@@ -367,7 +413,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'admin' && (
+          {activeTab === 'admin' && currentUser.role === 'admin' && (
             <AdminView
               users={users}
               domains={domains}
@@ -441,6 +487,19 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Auth Modal Portal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        initialMode={authModalMode}
+        darkMode={darkMode}
+        language={language}
+        onSuccess={(user) => {
+          setCurrentUser(user);
+          setIsAuthModalOpen(false);
+        }}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
 
       {/* Footer */}
       <Footer settings={settings} darkMode={darkMode} language={language} />

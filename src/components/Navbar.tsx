@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserProfile, AppSettings } from '../types';
-import { Globe, Moon, Sun, Zap, RefreshCw, Server, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { Globe, Moon, Sun, Zap, RefreshCw, Server, LogIn } from 'lucide-react';
 
 interface NavbarProps {
   currentUser: UserProfile;
@@ -20,11 +20,11 @@ interface NavbarProps {
     error?: string;
   };
   onRefreshHealth?: () => void;
+  onOpenAuthModal: (mode: 'login' | 'register') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
-  settings,
   darkMode,
   setDarkMode,
   language,
@@ -32,7 +32,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   backendUrl,
   onOpenCloudflareTab,
   backendHealth,
-  onRefreshHealth
+  onRefreshHealth,
+  onOpenAuthModal
 }) => {
   const isReady = backendHealth?.status === 'ready';
   const isOnline = backendHealth?.status === 'online_only';
@@ -52,7 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center space-x-2">
             <span className="font-bold text-lg tracking-tight">Boss URL Shortener</span>
             <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono">
-              v1.0 VPS
+              urlshort.nasirdigitalhub.com
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -127,6 +128,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
         </div>
+
+        {/* Sign In / Sign Up Button */}
+        <button
+          onClick={() => onOpenAuthModal('login')}
+          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition-all"
+        >
+          <LogIn className="w-3.5 h-3.5" />
+          <span>{language === 'bn' ? 'লগইন / সাইন আপ' : 'Sign In / Up'}</span>
+        </button>
 
         {/* Language Switcher */}
         <button
