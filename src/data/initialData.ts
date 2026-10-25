@@ -78,6 +78,22 @@ export const initialPackages: PackageTier[] = [
 
 export const initialDomains: CustomDomain[] = [
   {
+    id: 'dom_default_nasir',
+    domainName: 'urlshort.nasirdigitalhub.com',
+    status: 'active',
+    isVerified: true,
+    verificationToken: 'v_token_nasir_digital_hub',
+    dnsRecordType: 'dns_txt',
+    expectedDnsHost: '@',
+    expectedDnsValue: 'linkpro-verify=nasir-digital-hub-default',
+    verifiedAt: '2026-01-01 00:00:00',
+    createdAt: '2026-01-01 00:00:00',
+    isGlobal: true,
+    sslActive: true,
+    totalLinksCount: 320,
+    totalClicksCount: 8900
+  },
+  {
     id: 'dom_1',
     domainName: 'lnk.pro',
     status: 'active',
@@ -393,8 +409,8 @@ export const initialClickEvents: ClickEvent[] = [
 ];
 
 export const initialSettings: AppSettings = {
-  siteName: 'LinkPro Enterprise URL Shortener',
-  defaultDomain: 'lnk.pro',
+  siteName: 'Boss URL Shortener',
+  defaultDomain: 'urlshort.nasirdigitalhub.com',
   allowRegistration: true,
   defaultRedirectType: '302',
   maxUrlLength: 2048,
