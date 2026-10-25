@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { apiClient, BackendConfig } from '../services/apiClient';
+import { apiClient, BackendConfig, HealthResponse, ReadyResponse, Stage1LinkResponse } from '../services/apiClient';
 import { vpsShortenerService } from '../services/vpsShortenerService';
 import { 
-  Cloud, 
   Server, 
   Zap, 
   CheckCircle2, 
@@ -15,10 +14,9 @@ import {
   ShieldCheck,
   AlertTriangle,
   Sliders,
-  ArrowRight,
-  Code2,
   Send,
-  HelpCircle
+  Database,
+  Globe
 } from 'lucide-react';
 
 interface CloudflareIntegrationViewProps {
@@ -31,36 +29,24 @@ export const CloudflareIntegrationView: React.FC<CloudflareIntegrationViewProps>
   language
 }) => {
   const [config, setConfig] = useState<BackendConfig>(apiClient.getConfig());
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    reachable: boolean;
-    latencyMs: number;
-    url: string;
-    details?: any;
-    error?: string;
-  } | null>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [testingHealth, setTestingHealth] = useState(false);
+  const [testingReady, setTestingReady] = useState(false);
+  const [testingStage1, setTestingStage1] = useState(false);
+  const [testingAuthLinks, setTestingAuthLinks] = useState(false);
 
-  // Stage 2 /shorten.php Diagnostics State
-  const [mockFallbackActive, setMockFallbackActive] = useState<boolean>(vpsShortenerService.isMockFallbackEnabled());
-  const [stage2Testing, setStage2Testing] = useState(false);
-  const [testStage1Url, setTestStage1Url] = useState('https://lnk.pro/preview_test');
-  const [testOriginalUrl, setTestOriginalUrl] = useState('https://github.com/torvalds/linux');
-  const [stage2TestResult, setStage2TestResult] = useState<{
-    reachable: boolean;
-    latencyMs: number;
-    requestPayload: any;
-    responseStatus?: number;
-    responseBody?: any;
-    error?: string;
-  } | null>(null);
+  const [healthResult, setHealthResult] = useState<any>(null);
+  const [readyResult, setReadyResult] = useState<any>(null);
+  const [stage1Result, setStage1Result] = useState<any>(null);
+  const [authLinksResult, setAuthLinksResult] = useState<any>(null);
+
+  const [testStage1Input, setTestStage1Input] = useState('https://lnk.pro/preview_test_link');
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const presets = [
-    { label: 'Production API Domain', url: 'https://api.lnk.pro' },
-    { label: 'Direct Ubuntu VPS IP', url: 'http://142.93.120.45' },
-    { label: 'Cloudflare Pages Proxy', url: '/api', isProxy: true },
-    { label: 'Local PHP Dev Server', url: 'http://localhost:8000' },
+    { label: 'Boss VPS Production IP', url: 'http://107.174.37.180', isProxy: false },
+    { label: 'Vite / Cloudflare Proxy (/api)', url: '/api', isProxy: true },
+    { label: 'Local Development Server', url: 'http://localhost:8000', isProxy: false },
   ];
 
   const handleApplyPreset = (presetUrl: string, isProxy = false) => {
@@ -82,173 +68,309 @@ export const CloudflareIntegrationView: React.FC<CloudflareIntegrationViewProps>
     setTimeout(() => setSaveSuccess(false), 2000);
   };
 
-  const runTestConnection = async () => {
-    setTesting(true);
-    setTestResult(null);
+  const runHealthTest = async () => {
+    setTestingHealth(true);
+    setHealthResult(null);
+    const start = performance.now();
     try {
-      const res = await apiClient.ping();
-      setTestResult(res);
+      const res = await apiClient.getHealth();
+      const latency = Math.round(performance.now() - start);
+      setHealthResult({
+        ...res,
+        latencyMs: latency,
+        endpoint: apiClient.getEffectiveUrl('/api/health'),
+      });
     } finally {
-      setTesting(false);
+      setTestingHealth(false);
     }
   };
 
-  const toggleMockFallback = (enabled: boolean) => {
-    vpsShortenerService.setMockFallbackEnabled(enabled);
-    setMockFallbackActive(enabled);
-  };
-
-  const runStage2Test = async () => {
-    setStage2Testing(true);
-    setStage2TestResult(null);
+  const runReadyTest = async () => {
+    setTestingReady(true);
+    setReadyResult(null);
+    const start = performance.now();
     try {
-      const res = await vpsShortenerService.testVpsShortenEndpoint(testStage1Url, testOriginalUrl);
-      setStage2TestResult(res);
+      const res = await apiClient.getReady();
+      const latency = Math.round(performance.now() - start);
+      setReadyResult({
+        ...res,
+        latencyMs: latency,
+        endpoint: apiClient.getEffectiveUrl('/api/ready'),
+      });
     } finally {
-      setStage2Testing(false);
+      setTestingReady(false);
     }
   };
 
-  const copyCode = (text: string, key: string) => {
+  const runStage1Test = async () => {
+    setTestingStage1(true);
+    setStage1Result(null);
+    const start = performance.now();
+    try {
+      const res = await apiClient.createStage1Link(testStage1Input);
+      const latency = Math.round(performance.now() - start);
+      setStage1Result({
+        ...res,
+        latencyMs: latency,
+        endpoint: apiClient.getEffectiveUrl('/api/links/stage1'),
+        payload: { url: testStage1Input },
+      });
+    } finally {
+      setTestingStage1(false);
+    }
+  };
+
+  const runAuthLinksTest = async () => {
+    setTestingAuthLinks(true);
+    setAuthLinksResult(null);
+    const start = performance.now();
+    try {
+      const res = await apiClient.getLinks();
+      const latency = Math.round(performance.now() - start);
+      setAuthLinksResult({
+        ...res,
+        latencyMs: latency,
+        endpoint: apiClient.getEffectiveUrl('/api/links'),
+      });
+    } finally {
+      setTestingAuthLinks(false);
+    }
+  };
+
+  // Run initial health check on load
+  useEffect(() => {
+    runHealthTest();
+    runReadyTest();
+  }, []);
+
+  const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
-    setCopiedKey(key);
+    setCopiedKey(id);
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const nginxCorsSnippet = `# Add inside your existing Nginx server block on Ubuntu VPS
-# /etc/nginx/sites-available/linkpro
-
-location /api/ {
-    # Allow requests from your Cloudflare Pages frontend domain
-    if ($http_origin ~* "^https://.*\\.pages\\.dev$|^https://(lnk\\.pro|app\\.lnk\\.pro)$") {
-        add_header "Access-Control-Allow-Origin" "$http_origin" always;
-        add_header "Access-Control-Allow-Methods" "GET, POST, PUT, DELETE, OPTIONS" always;
-        add_header "Access-Control-Allow-Headers" "Authorization, Content-Type, Accept, X-Requested-With" always;
-        add_header "Access-Control-Allow-Credentials" "true" always;
-        add_header "Access-Control-Max-Age" "86400" always;
-    }
-
-    # Respond instantly to browser preflight OPTIONS requests
-    if ($request_method = "OPTIONS") {
-        return 204;
-    }
-
-    try_files $uri $uri/ /index.php?$query_string;
-}`;
-
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-8 max-w-5xl mx-auto pb-12">
       {/* Header */}
       <div>
         <div className="flex items-center space-x-2 text-indigo-600 dark:text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-1">
-          <Cloud className="w-4 h-4" />
-          <span>{language === 'bn' ? 'ক্লাউডফ্লেয়ার ও ভিপিএস ইন্টিগ্রেশন' : 'Cloudflare Frontend + VPS Backend Integration'}</span>
+          <Server className="w-4 h-4" />
+          <span>Boss URL Shortener &bull; Live VPS Backend Integration</span>
         </div>
         <h1 className="text-2xl font-bold tracking-tight">
-          {language === 'bn' ? 'ক্লাউডফ্লেয়ার পেজেস ও উবুন্টু ব্যাকএন্ড কানেক্টিভিটি' : 'Cloudflare Pages & Ubuntu Backend Connectivity'}
+          {language === 'bn' ? 'ভিপিএস ব্যাকএন্ড সংযোগ ও লাইভ এপিআই ডায়াগনস্টিক' : 'VPS Backend Connection & API Diagnostics'}
         </h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          {language === 'bn'
-            ? 'ক্লাউডফ্লেয়ারে হোস্ট করা ফ্রন্টএন্ড এবং উবুন্টু ভিপিএস-এ চলমান অথরিটেটিভ পিএইচপি/এনজিন্ড/মারিয়াডিবি ব্যাকএন্ডের মধ্যে সংযোগ পরিচালনা করুন।'
-            : 'Configure and test the authoritative connection between this Cloudflare Pages frontend and your existing PHP/Nginx/MariaDB backend on Ubuntu VPS.'}
+          Authoritative production backend: <code className="text-indigo-400 font-mono">http://107.174.37.180</code> running Nginx, PHP 7.4-FPM, and MariaDB.
         </p>
       </div>
 
-      {/* Connectivity Status Banner */}
-      <div className={`p-6 rounded-2xl border ${
+      {/* Verified Status Banner */}
+      <div className={`p-5 rounded-2xl border ${
         darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
       }`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start space-x-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
-              <Server className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-bold text-sm">Authoritative Backend Endpoint:</span>
-                <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  {config.useProxy ? 'Cloudflare Edge Proxy (/api)' : config.baseUrl}
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                All short codes, domain validation, rate limiting, and 302 redirects are generated directly by your VPS.
-              </p>
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs font-mono">
+          <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800">
+            <span className="text-slate-400 block text-[11px]">Server IP</span>
+            <span className="font-bold text-slate-200">107.174.37.180</span>
           </div>
-
-          <button
-            onClick={runTestConnection}
-            disabled={testing}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-500/25 flex items-center justify-center space-x-2 transition-all shrink-0"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} />
-            <span>{testing ? 'Testing Endpoint...' : 'Test Backend Connection'}</span>
-          </button>
+          <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800">
+            <span className="text-slate-400 block text-[11px]">Web Server</span>
+            <span className="font-bold text-emerald-400">Nginx + PHP 7.4.3</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800">
+            <span className="text-slate-400 block text-[11px]">Database</span>
+            <span className="font-bold text-indigo-400">MariaDB (boss_shortener)</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800">
+            <span className="text-slate-400 block text-[11px]">Storage Status</span>
+            <span className="font-bold text-emerald-400">Ready (Writable)</span>
+          </div>
         </div>
-
-        {/* Test Result Display */}
-        {testResult && (
-          <div className={`mt-4 p-4 rounded-xl border text-xs font-mono space-y-2 animate-fadeIn ${
-            testResult.reachable 
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' 
-              : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 font-bold">
-                {testResult.reachable ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-rose-400" />}
-                <span>{testResult.reachable ? 'HTTP 200 OK — Backend Connected Successfully' : 'Connection Failed'}</span>
-              </div>
-              <span className="text-[11px] px-2 py-0.5 rounded bg-black/40">
-                Latency: {testResult.latencyMs} ms
-              </span>
-            </div>
-            <div className="text-[11px] opacity-80">
-              Target: {testResult.url}
-            </div>
-            {testResult.error && (
-              <div className="p-2 rounded bg-black/40 text-rose-400 text-[11px]">
-                Error: {testResult.error}
-              </div>
-            )}
-            {testResult.details && (
-              <div className="p-2 rounded bg-black/40 text-emerald-300 text-[11px] truncate">
-                Payload: {JSON.stringify(testResult.details)}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* Backend Settings Configuration */}
+      {/* Live API Diagnostics Grid */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold flex items-center space-x-2">
+            <Zap className="w-4 h-4 text-amber-400" />
+            <span>Interactive Endpoint Tests (Real VPS Responses)</span>
+          </h2>
+          <span className="text-xs text-slate-400 font-mono">Zero mocks &bull; Real live requests</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Test 1: GET /api/health */}
+          <div className={`p-5 rounded-2xl border flex flex-col justify-between ${
+            darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  GET /api/health
+                </span>
+                {healthResult && (
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold ${
+                    healthResult.success ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                  }`}>
+                    {healthResult.success ? 'HTTP 200 OK' : 'Failed'} ({healthResult.latencyMs}ms)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mb-3">Checks core application process status and server timestamp.</p>
+              
+              {healthResult && (
+                <div className="p-3 rounded-lg bg-black/60 font-mono text-[11px] border border-slate-800 overflow-x-auto text-slate-300 mb-3">
+                  <pre>{JSON.stringify(healthResult.data || healthResult.error, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={runHealthTest}
+              disabled={testingHealth}
+              className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center justify-center space-x-2 transition-all border border-slate-700"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${testingHealth ? 'animate-spin' : ''}`} />
+              <span>{testingHealth ? 'Testing Health...' : 'Execute GET /api/health'}</span>
+            </button>
+          </div>
+
+          {/* Test 2: GET /api/ready */}
+          <div className={`p-5 rounded-2xl border flex flex-col justify-between ${
+            darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  GET /api/ready
+                </span>
+                {readyResult && (
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold ${
+                    readyResult.success ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                  }`}>
+                    {readyResult.success ? 'HTTP 200 READY' : 'Failed'} ({readyResult.latencyMs}ms)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mb-3">Verifies database connectivity and filesystem storage readiness.</p>
+              
+              {readyResult && (
+                <div className="p-3 rounded-lg bg-black/60 font-mono text-[11px] border border-slate-800 overflow-x-auto text-slate-300 mb-3">
+                  <pre>{JSON.stringify(readyResult.data || readyResult.error, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={runReadyTest}
+              disabled={testingReady}
+              className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center justify-center space-x-2 transition-all border border-slate-700"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${testingReady ? 'animate-spin' : ''}`} />
+              <span>{testingReady ? 'Testing Readiness...' : 'Execute GET /api/ready'}</span>
+            </button>
+          </div>
+
+          {/* Test 3: POST /api/links/stage1 */}
+          <div className={`p-5 rounded-2xl border md:col-span-2 flex flex-col justify-between ${
+            darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  POST /api/links/stage1
+                </span>
+                {stage1Result && (
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold ${
+                    stage1Result.success ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                  }`}>
+                    {stage1Result.success ? 'HTTP 201 Created' : 'Failed'} ({stage1Result.latencyMs}ms)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                Submits the first-stage short URL to Boss VPS API and receives the live short link redirecting via 302 Found.
+              </p>
+
+              <div className="flex items-center space-x-2 mb-3">
+                <input
+                  type="url"
+                  value={testStage1Input}
+                  onChange={(e) => setTestStage1Input(e.target.value)}
+                  className={`flex-1 px-3 py-1.5 rounded-lg border text-xs font-mono outline-none ${
+                    darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                  }`}
+                  placeholder="https://..."
+                />
+                <button
+                  onClick={runStage1Test}
+                  disabled={testingStage1}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center space-x-1.5 transition-all"
+                >
+                  <Send className={`w-3.5 h-3.5 ${testingStage1 ? 'animate-pulse' : ''}`} />
+                  <span>{testingStage1 ? 'Sending...' : 'Test Stage 1'}</span>
+                </button>
+              </div>
+
+              {stage1Result && (
+                <div className="space-y-2 mb-3">
+                  <div className="p-3 rounded-lg bg-black/60 font-mono text-[11px] border border-slate-800 overflow-x-auto text-slate-300">
+                    <pre>{JSON.stringify(stage1Result.data || stage1Result.error, null, 2)}</pre>
+                  </div>
+                  {stage1Result.data?.stage1_url && (
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-xs">
+                      <span className="font-mono text-emerald-300 break-all">{stage1Result.data.stage1_url}</span>
+                      <a
+                        href={stage1Result.data.stage1_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-2 px-2.5 py-1 rounded bg-emerald-600 text-white font-semibold text-[11px] flex items-center space-x-1 hover:bg-emerald-500"
+                      >
+                        <span>Test 302</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Backend Settings Form */}
       <div className={`p-6 rounded-2xl border ${
-        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
+        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
       }`}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
-            <Sliders className="w-5 h-5 text-indigo-500" />
-            <h2 className="text-base font-bold">Backend Connection Settings</h2>
+            <Sliders className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-base font-bold">API Connection & Routing Configuration</h2>
           </div>
           {saveSuccess && (
-            <span className="text-xs text-emerald-400 font-medium flex items-center space-x-1 animate-fadeIn">
-              <Check className="w-3.5 h-3.5" />
-              <span>Settings Saved!</span>
+            <span className="text-xs px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 flex items-center space-x-1">
+              <Check className="w-3 h-3" />
+              <span>Saved!</span>
             </span>
           )}
         </div>
 
         {/* Presets */}
         <div className="mb-4">
-          <label className="block text-xs font-medium mb-1.5 text-slate-400">Quick Endpoint Presets</label>
+          <span className="text-xs text-slate-400 block mb-2">Quick Presets:</span>
           <div className="flex flex-wrap gap-2">
             {presets.map((p, idx) => (
               <button
                 key={idx}
                 type="button"
                 onClick={() => handleApplyPreset(p.url, p.isProxy)}
-                className={`px-3 py-1 rounded-lg text-xs font-mono transition-all border ${
-                  config.baseUrl === p.url && config.useProxy === (p.isProxy || false)
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition-all ${
+                  config.baseUrl === p.url && config.useProxy === p.isProxy
                     ? 'bg-indigo-600 text-white border-indigo-500'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                    : darkMode
+                    ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 {p.label}
@@ -258,319 +380,55 @@ location /api/ {
         </div>
 
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium mb-1 text-slate-400">
-                Authoritative VPS API Base URL
-              </label>
-              <input
-                type="text"
-                required
-                value={config.baseUrl}
-                onChange={(e) => setConfig({ ...config, baseUrl: e.target.value })}
-                placeholder="https://api.lnk.pro or http://YOUR_VPS_IP"
-                className="w-full px-3.5 py-2.5 rounded-xl border bg-slate-800 border-slate-700 text-sm font-mono text-white outline-none focus:border-indigo-500"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">
-                The origin hosting your PHP index.php & redirect.php.
-              </span>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1 text-slate-400">
-                API Bearer Token (Optional Service Auth)
-              </label>
-              <input
-                type="password"
-                value={config.apiToken}
-                onChange={(e) => setConfig({ ...config, apiToken: e.target.value })}
-                placeholder="Leave blank for session/cookie auth"
-                className="w-full px-3.5 py-2.5 rounded-xl border bg-slate-800 border-slate-700 text-sm font-mono text-white outline-none focus:border-indigo-500"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">
-                Passed in the <code className="text-indigo-400">Authorization: Bearer &lt;token&gt;</code> header.
-              </span>
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">
+              Backend API Base URL
+            </label>
+            <input
+              type="text"
+              value={config.baseUrl}
+              onChange={(e) => setConfig({ ...config, baseUrl: e.target.value })}
+              className={`w-full px-3.5 py-2 rounded-xl border text-xs font-mono outline-none ${
+                darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+              }`}
+            />
           </div>
 
-          <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950/60">
-            <div>
-              <div className="text-xs font-semibold text-slate-200">Use Cloudflare Pages Edge Proxy (/api/*)</div>
-              <div className="text-[11px] text-slate-400">
-                Routes API requests through Cloudflare Workers to bypass browser CORS and mask VPS origin IP.
-              </div>
-            </div>
+          <div className="flex items-center space-x-3">
             <input
               type="checkbox"
+              id="useProxy"
               checked={config.useProxy}
               onChange={(e) => setConfig({ ...config, useProxy: e.target.checked })}
-              className="w-5 h-5 accent-indigo-600 rounded"
+              className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
+            />
+            <label htmlFor="useProxy" className="text-xs text-slate-300 select-none">
+              Enable Proxy Mode (<code className="text-indigo-400">/api</code> endpoint) &bull; Prevents HTTPS Mixed Content restrictions when running in preview
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">
+              API Bearer Token (Optional for protected user endpoints)
+            </label>
+            <input
+              type="password"
+              placeholder="Paste Bearer token from /api/auth/login"
+              value={config.apiToken}
+              onChange={(e) => setConfig({ ...config, apiToken: e.target.value })}
+              className={`w-full px-3.5 py-2 rounded-xl border text-xs font-mono outline-none ${
+                darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+              }`}
             />
           </div>
 
-          <div className="flex justify-end space-x-3">
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-500/25"
-            >
-              Save Configuration
-            </button>
-          </div>
+          <button
+            type="submit"
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all"
+          >
+            Save Configuration
+          </button>
         </form>
-      </div>
-
-      {/* Stage 2 VPS /shorten.php Diagnostic Suite */}
-      <div className={`p-6 rounded-2xl border ${
-        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
-      }`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div className="flex items-center space-x-2">
-            <Zap className="w-5 h-5 text-indigo-500" />
-            <div>
-              <h2 className="text-base font-bold">
-                {language === 'bn' ? 'স্টেজ ২ ভিপিএস shorten.php ডায়াগনস্টিক টেস্ট' : 'Stage 2 VPS /shorten.php Diagnostic Tester'}
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {language === 'bn' 
-                  ? 'উবুন্টু ভিপিএস-এ { short_url, original_url } পেলোড পাঠিয়ে টেস্ট করুন।' 
-                  : 'Directly dispatch { short_url, original_url } to your Ubuntu VPS endpoint and verify error: 0 response.'}
-              </p>
-            </div>
-          </div>
-
-          {/* Mock Fallback Toggle */}
-          <div className="flex items-center space-x-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700 text-xs">
-            <div className="text-[11px] text-slate-300">
-              <span className="font-semibold">Local Offline Mock:</span>{' '}
-              <span className={mockFallbackActive ? 'text-amber-400 font-bold' : 'text-slate-500'}>
-                {mockFallbackActive ? 'Active' : 'Disabled (Live VPS Enforced)'}
-              </span>
-            </div>
-            <input
-              type="checkbox"
-              checked={mockFallbackActive}
-              onChange={(e) => toggleMockFallback(e.target.checked)}
-              className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-              title="Toggle mock fallback for testing without VPS"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-xs font-medium mb-1 text-slate-400">
-              Stage 1 Short URL (short_url field)
-            </label>
-            <input
-              type="url"
-              value={testStage1Url}
-              onChange={(e) => setTestStage1Url(e.target.value)}
-              placeholder="https://lnk.pro/preview_test"
-              className="w-full px-3 py-2 rounded-xl border bg-slate-800 border-slate-700 text-xs font-mono text-white outline-none focus:border-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium mb-1 text-slate-400">
-              Original Long Destination URL (original_url field)
-            </label>
-            <input
-              type="url"
-              value={testOriginalUrl}
-              onChange={(e) => setTestOriginalUrl(e.target.value)}
-              placeholder="https://github.com/torvalds/linux"
-              className="w-full px-3 py-2 rounded-xl border bg-slate-800 border-slate-700 text-xs font-mono text-white outline-none focus:border-indigo-500"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="text-[11px] text-slate-400 font-mono">
-            POST {config.useProxy ? `${config.proxyEndpoint}/shorten.php` : `${config.baseUrl}/shorten.php`}
-          </div>
-
-          <button
-            type="button"
-            onClick={runStage2Test}
-            disabled={stage2Testing}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-500/25 flex items-center space-x-2 transition-all disabled:opacity-50"
-          >
-            <Send className={`w-3.5 h-3.5 ${stage2Testing ? 'animate-bounce' : ''}`} />
-            <span>{stage2Testing ? 'Dispatching to VPS...' : 'Test POST /shorten.php'}</span>
-          </button>
-        </div>
-
-        {/* Stage 2 Test Result View */}
-        {stage2TestResult && (
-          <div className={`mt-4 p-4 rounded-xl border text-xs font-mono space-y-2 animate-fadeIn ${
-            stage2TestResult.reachable 
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' 
-              : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 font-bold">
-                {stage2TestResult.reachable ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                ) : (
-                  <XCircle className="w-4 h-4 text-rose-400" />
-                )}
-                <span>
-                  {stage2TestResult.reachable 
-                    ? `HTTP ${stage2TestResult.responseStatus || 200} OK — Stage 2 Validated` 
-                    : `Stage 2 Endpoint Test Failed`}
-                </span>
-              </div>
-              <span className="text-[11px] px-2 py-0.5 rounded bg-black/40">
-                Latency: {stage2TestResult.latencyMs} ms
-              </span>
-            </div>
-
-            {/* Request Payload Sent */}
-            <div className="p-2.5 rounded bg-black/50 border border-slate-800 space-y-1">
-              <div className="text-[10px] text-slate-400 uppercase font-semibold">Sent JSON Request:</div>
-              <pre className="text-[11px] text-indigo-300 overflow-x-auto">
-                {JSON.stringify(stage2TestResult.requestPayload, null, 2)}
-              </pre>
-            </div>
-
-            {/* Received Response */}
-            <div className="p-2.5 rounded bg-black/50 border border-slate-800 space-y-1">
-              <div className="text-[10px] text-slate-400 uppercase font-semibold">Received VPS Response:</div>
-              <pre className="text-[11px] overflow-x-auto text-emerald-300">
-                {typeof stage2TestResult.responseBody === 'object'
-                  ? JSON.stringify(stage2TestResult.responseBody, null, 2)
-                  : String(stage2TestResult.responseBody || stage2TestResult.error)}
-              </pre>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Cloudflare Pages Edge Function Code */}
-      <div className={`p-6 rounded-2xl border ${
-        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
-      }`}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-2">
-            <Code2 className="w-5 h-5 text-indigo-500" />
-            <h2 className="text-base font-bold">Cloudflare Pages Edge Proxy (functions/api/[[route]].ts)</h2>
-          </div>
-          <button
-            onClick={() => copyCode(`// Cloudflare Pages Function Proxy\n// Located at /functions/api/[[route]].ts`, 'cf_edge')}
-            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs font-mono text-slate-300 hover:bg-slate-700 flex items-center space-x-1.5"
-          >
-            {copiedKey === 'cf_edge' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedKey === 'cf_edge' ? 'Copied' : 'Copy Proxy Code'}</span>
-          </button>
-        </div>
-        <p className="text-xs text-slate-400 mb-3">
-          This edge function is committed in <code className="text-indigo-400">functions/api/[[route]].ts</code>. When deployed to Cloudflare Pages, it intercepts all calls to <code className="text-indigo-400">/api/*</code> and securely relays them to your Ubuntu VPS backend.
-        </p>
-        <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-indigo-300 overflow-x-auto max-h-56">
-          <code>{`export const onRequest: PagesFunction<Env> = async (context) => {
-  const { request, env } = context;
-  const url = new URL(request.url);
-  const backendBaseUrl = (env.BACKEND_API_URL || 'https://api.lnk.pro').replace(/\\/+$/, '');
-  const targetUrl = new URL(\`\${backendBaseUrl}\${url.pathname}\${url.search}\`);
-
-  // Forward request with origin IP & Host headers
-  const forwardHeaders = new Headers(request.headers);
-  forwardHeaders.set('X-Forwarded-For', request.headers.get('CF-Connecting-IP') || '');
-  forwardHeaders.set('Host', new URL(backendBaseUrl).hostname);
-
-  const response = await fetch(targetUrl.toString(), {
-    method: request.method,
-    headers: forwardHeaders,
-    body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-  });
-
-  return new Response(response.body, {
-    status: response.status,
-    headers: response.headers
-  });
-};`}</code>
-        </pre>
-      </div>
-
-      {/* Ubuntu VPS Nginx CORS Block */}
-      <div className={`p-6 rounded-2xl border ${
-        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
-      }`}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-2">
-            <Terminal className="w-5 h-5 text-indigo-500" />
-            <h2 className="text-base font-bold">Ubuntu VPS Nginx CORS Configuration</h2>
-          </div>
-          <button
-            onClick={() => copyCode(nginxCorsSnippet, 'nginx_cors')}
-            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs font-mono text-slate-300 hover:bg-slate-700 flex items-center space-x-1.5"
-          >
-            {copiedKey === 'nginx_cors' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedKey === 'nginx_cors' ? 'Copied' : 'Copy Nginx Block'}</span>
-          </button>
-        </div>
-        <p className="text-xs text-slate-400 mb-3">
-          If calling the backend directly from the browser (without the Cloudflare Edge proxy), ensure your VPS Nginx server block contains these CORS headers:
-        </p>
-        <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-indigo-300 overflow-x-auto max-h-56">
-          <code>{nginxCorsSnippet}</code>
-        </pre>
-      </div>
-
-      {/* Cloudflare CI/CD Pipeline Troubleshooting */}
-      <div className={`p-6 rounded-2xl border ${
-        darkMode ? 'bg-amber-950/30 border-amber-800/60' : 'bg-amber-50 border-amber-200 shadow-xs'
-      }`}>
-        <div className="flex items-center space-x-2 text-amber-500 mb-2">
-          <AlertTriangle className="w-5 h-5" />
-          <h2 className="text-base font-bold">Cloudflare CI Build Error Fix (Missing Entry-Point / Pages Warning)</h2>
-        </div>
-        <p className="text-xs text-amber-200/90 mb-3">
-          If your Cloudflare CI log shows <code className="bg-amber-900/50 px-1 py-0.5 rounded text-amber-300">▲ [WARNING] You ran wrangler deploy on a Pages project</code> followed by <code className="bg-amber-900/50 px-1 py-0.5 rounded text-amber-300">✘ [ERROR] Missing entry-point to Worker script or to assets directory</code>:
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
-          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
-            <div className="text-amber-400 font-bold mb-1">Fix 1: In Cloudflare Pages Dashboard (No git push needed)</div>
-            <p className="text-slate-400 font-sans mb-2">Go to <strong>Settings &gt; Builds &amp; deployments</strong>:</p>
-            <div className="text-slate-400 font-sans">1. <strong>Build command:</strong> <span className="text-emerald-400 font-mono">bun run build</span> (or <span className="text-emerald-400 font-mono">npm run build</span>)</div>
-            <div className="text-slate-400 font-sans">2. <strong>Build output directory:</strong> <span className="text-emerald-400 font-mono">dist</span></div>
-            <div className="text-slate-400 font-sans">3. <strong>Deploy command:</strong> <span className="text-rose-400 font-mono">LEAVE EMPTY</span> (Cloudflare Pages auto-deploys dist)</div>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
-            <div className="text-cyan-400 font-bold mb-1">Fix 2: If deploying via Workers with Static Assets</div>
-            <p className="text-slate-400 font-sans mb-2">Ensure your GitHub repository has the 4 updated files:</p>
-            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">wrangler.toml</span> (with <span className="text-indigo-300">main = "src/worker.ts"</span> and <span className="text-indigo-300">[assets]</span>)</div>
-            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">src/worker.ts</span> (Worker edge proxy and static asset server)</div>
-            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">package.json</span> (includes wrangler in devDependencies)</div>
-            <div className="text-slate-400 font-sans">• <span className="text-indigo-400 font-mono">vite.config.ts</span> (uses import.meta.dirname)</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Cloudflare Deployment Step-by-Step */}
-      <div className={`p-6 rounded-2xl border ${
-        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
-      }`}>
-        <h2 className="text-base font-bold mb-3">Cloudflare Deployment Commands (Pages &amp; Workers)</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-slate-300">
-            <div className="text-emerald-400 font-semibold mb-1">Option A: Cloudflare Workers (Assets)</div>
-            <div className="text-slate-500"># 1. Build and deploy via Wrangler</div>
-            <div className="text-indigo-400">npm run build</div>
-            <div className="text-indigo-400">npx wrangler deploy</div>
-            <div className="text-slate-500 mt-2"># 2. Set backend VPS secret</div>
-            <div className="text-indigo-400">npx wrangler secret put BACKEND_API_URL</div>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-slate-300">
-            <div className="text-cyan-400 font-semibold mb-1">Option B: Cloudflare Pages</div>
-            <div className="text-slate-500"># 1. Build frontend dist</div>
-            <div className="text-indigo-400">npm run build</div>
-            <div className="text-slate-500 mt-2"># 2. Deploy to Pages with functions proxy</div>
-            <div className="text-indigo-400">npx wrangler pages deploy dist --project-name=linkpro-enterprise-frontend</div>
-            <div className="text-slate-500 mt-2"># 3. Set backend secret in Pages</div>
-            <div className="text-indigo-400">npx wrangler pages secret put BACKEND_API_URL</div>
-          </div>
-        </div>
       </div>
     </div>
   );

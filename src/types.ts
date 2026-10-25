@@ -112,6 +112,8 @@ export interface LinkItem {
   userId: string;
   lastClickedAt?: string;
   redirectType: '302' | '301';
+  stage1Id?: number;
+  backendMode?: 'stage1' | 'authenticated' | 'local';
 }
 
 export interface VpsShortenRequest {

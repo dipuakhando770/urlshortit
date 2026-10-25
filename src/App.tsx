@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   initialLinks, 
   initialClickEvents, 
@@ -61,138 +61,113 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
 
+  // Backend Health & Readiness State
+  const [backendHealth, setBackendHealth] = useState<{
+    status: 'checking' | 'ready' | 'online_only' | 'unreachable' | 'error';
+    latencyMs: number;
+    details?: any;
+    error?: string;
+  }>({
+    status: 'checking',
+    latencyMs: 0,
+  });
+
   const currentPackage = packages.find(p => p.id === currentUser.packageId) || packages[0];
   const userSubscription = subscriptions.find(s => s.userId === currentUser.id);
 
-  // Two-Stage Sequential URL Shortening Architecture
-  // Stage 1: Existing Frontend Branded Shortener
-  // Stage 2: Authoritative Ubuntu VPS shorten.php API
+  // Check backend health on mount
+  const checkBackendHealth = async () => {
+    setBackendHealth(prev => ({ ...prev, status: 'checking' }));
+    const res = await apiClient.ping();
+    if (res.reachable) {
+      setBackendHealth({
+        status: 'ready',
+        latencyMs: res.latencyMs,
+        details: res.health || res.ready,
+      });
+    } else {
+      setBackendHealth({
+        status: 'unreachable',
+        latencyMs: res.latencyMs,
+        error: res.error || 'Backend unreachable',
+      });
+    }
+  };
+
+  useEffect(() => {
+    checkBackendHealth();
+  }, []);
+
+  /**
+   * Sequential Shortening Flow:
+   * 1. Validate original URL.
+   * 2. Generate local Stage 1 URL.
+   * 3. Dispatch to Boss VPS API: POST /api/links/stage1
+   * 4. Save and return real Boss VPS short URL.
+   */
   const handleAddLink = async (
     domainId: string, 
     originalUrl: string, 
     customAlias?: string, 
     title?: string, 
-    description?: string,
-    existingStage1Url?: string
+    description?: string
   ): Promise<{ 
     success: boolean; 
     error?: string; 
     finalUrl?: string; 
     stage1Url?: string;
-    stage?: 'stage1' | 'stage2';
+    stage1Code?: string;
+    originalUrl?: string;
+    stage1Id?: number;
   }> => {
     // 1. Input Validation: Only HTTP and HTTPS permitted
     try {
       const parsed = new URL(originalUrl);
       if (!['http:', 'https:'].includes(parsed.protocol)) {
-        return { success: false, error: 'Original destination URL must be a valid HTTP or HTTPS address.', stage: 'stage1' };
+        return { success: false, error: 'Original destination URL must be a valid HTTP or HTTPS address.' };
       }
     } catch {
-      return { success: false, error: 'Malformed URL. Please enter a valid URL beginning with http:// or https://', stage: 'stage1' };
+      return { success: false, error: 'Malformed URL. Please enter a valid URL beginning with http:// or https://' };
     }
 
-    // 2. Account & Subscription State Checks
-    if (currentUser.status !== 'active') {
-      return { success: false, error: 'Your account is suspended or disabled. Link creation is blocked.', stage: 'stage1' };
-    }
+    const shortCode = customAlias && customAlias.trim() 
+      ? customAlias.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+      : 's1_' + Math.random().toString(36).substring(2, 8);
 
-    const domain = domains.find(d => d.id === domainId);
-    if (!domain) {
-      return { success: false, error: 'Target short-link domain does not exist.', stage: 'stage1' };
-    }
+    const domain = domains.find(d => d.id === domainId) || domains[0];
+    const frontendStage1Url = `https://${domain.domainName}/${shortCode}`;
 
-    if (!domain.isVerified) {
-      return { success: false, error: `Domain '${domain.domainName}' is pending DNS TXT verification. Unverified domains cannot be used.`, stage: 'stage1' };
-    }
+    // Dispatch to Boss VPS API: POST /api/links/stage1
+    const vpsRes = await vpsShortenerService.callVpsShorten(frontendStage1Url, originalUrl);
 
-    if (domain.status !== 'active') {
-      return { success: false, error: `Domain '${domain.domainName}' is currently inactive or suspended.`, stage: 'stage1' };
-    }
-
-    // Explicit User-Level Denial check
-    const explicitPerm = permissions.find(p => p.userId === currentUser.id && p.domainId === domain.id);
-    if (explicitPerm && !explicitPerm.isAllowed) {
-      return { success: false, error: `Domain Access Denied: Administrator has explicitly denied your account access to '${domain.domainName}'.`, stage: 'stage1' };
-    }
-
-    // Permission authorization
-    const hasExplicitAllow = explicitPerm && explicitPerm.isAllowed;
-    const hasUnlimitedDomainAccess = currentUser.hasAllDomainsAccess || currentPackage.hasAllDomainsAccess;
-    const isDomainOwner = domain.userId === currentUser.id;
-    const isGlobalAndPaid = domain.isGlobal && currentUser.packageId !== 'pkg_free';
-
-    if (!hasExplicitAllow && !hasUnlimitedDomainAccess && !isDomainOwner && !isGlobalAndPaid) {
-      return { 
-        success: false, 
-        error: `Domain Access Denied: '${domain.domainName}' is not included in your current subscription plan (${currentPackage.name}). Please upgrade.`,
-        stage: 'stage1'
-      };
-    }
-
-    // Subscription Quota Check
-    const userLinks = links.filter(l => l.userId === currentUser.id);
-    if (currentPackage.maxLinksQuota !== -1 && userLinks.length >= currentPackage.maxLinksQuota) {
-      return { 
-        success: false, 
-        error: `Subscription limit reached! Your plan (${currentPackage.name}) allows a maximum of ${currentPackage.maxLinksQuota} short links.`,
-        stage: 'stage1'
-      };
-    }
-
-    if (customAlias && customAlias.trim() && !currentPackage.allowCustomAlias && currentUser.role !== 'admin') {
-      return { success: false, error: 'Custom short aliases require a paid subscription tier.', stage: 'stage1' };
-    }
-
-    // --- STAGE 1: EXISTING FRONTEND SHORTENER ---
-    let stage1ShortUrl = existingStage1Url;
-    let shortCode = '';
-
-    if (!stage1ShortUrl) {
-      shortCode = customAlias && customAlias.trim() 
-        ? customAlias.trim().replace(/[^a-zA-Z0-9_-]/g, '')
-        : Math.random().toString(36).substring(2, 8);
-
-      const isDuplicate = links.some(l => l.domainId === domain.id && l.shortCode.toLowerCase() === shortCode.toLowerCase());
-      if (isDuplicate) {
-        return { success: false, error: `Short code '/${shortCode}' is already taken on domain '${domain.domainName}'. Please choose a different code.`, stage: 'stage1' };
-      }
-
-      stage1ShortUrl = `https://${domain.domainName}/${shortCode}`;
-    }
-
-    // --- STAGE 2: CALL UBUNTU VPS shorten.php ---
-    // The VPS backend receives { short_url: stage1ShortUrl, original_url: originalUrl }
-    const stage2Res = await vpsShortenerService.callVpsShorten(stage1ShortUrl, originalUrl);
-
-    if (!stage2Res.success || !stage2Res.finalShortUrl) {
-      // Stage 2 failed: Never display a fabricated final URL if Stage 2 fails!
+    if (!vpsRes.success || !vpsRes.finalShortUrl) {
       return {
         success: false,
-        error: stage2Res.error?.message || 'VPS Backend /shorten.php failed to generate the final short URL.',
-        stage: 'stage2',
-        stage1Url: stage1ShortUrl
+        error: vpsRes.error?.message || 'Boss URL Shortener VPS API failed to generate short link.',
       };
     }
 
-    const finalShortUrl = stage2Res.finalShortUrl;
-    const finalCode = stage2Res.code || shortCode;
+    const finalShortUrl = vpsRes.finalShortUrl;
+    const finalCode = vpsRes.code || shortCode;
+    const linkId = vpsRes.id ? Number(vpsRes.id) : Date.now();
 
-    // The final URL returned by the VPS backend is the ONLY URL presented as final result
     const newLink: LinkItem = {
-      id: stage2Res.id || ('lnk_' + Date.now()),
+      id: String(linkId),
       domainId: domain.id,
       domainName: domain.domainName,
-      originalUrl, // Must remain original long URL
+      originalUrl,
       shortCode: finalCode,
-      shortUrl: finalShortUrl, // ONLY the backend-generated final URL is presented
-      stage1ShortUrl, // Preserved for transparency
+      shortUrl: finalShortUrl,
+      stage1ShortUrl: frontendStage1Url,
       title: title || originalUrl.replace(/^https?:\/\//, '').split('/')[0],
-      description: description || '',
+      description: description || 'Created via Boss VPS Sequential Shortener',
       clicks: 0,
       createdAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
       status: 'active',
       userId: currentUser.id,
-      redirectType: '302'
+      redirectType: '302',
+      stage1Id: typeof linkId === 'number' ? linkId : undefined,
+      backendMode: 'stage1',
     };
 
     setLinks([newLink, ...links]);
@@ -202,7 +177,7 @@ export default function App() {
       id: 'aud_' + Date.now(),
       userId: currentUser.id,
       userName: currentUser.name,
-      action: `Sequential Shortener: [Stage 1: ${stage1ShortUrl}] -> [Stage 2 VPS Final: ${finalShortUrl}] -> ${originalUrl.substring(0, 30)}...`,
+      action: `Boss VPS API Stage 1 Shortener: ${finalShortUrl} -> ${originalUrl}`,
       ip: '192.168.1.1',
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
     };
@@ -211,7 +186,10 @@ export default function App() {
     return { 
       success: true, 
       finalUrl: finalShortUrl, 
-      stage1Url: stage1ShortUrl 
+      stage1Url: finalShortUrl,
+      stage1Code: finalCode,
+      originalUrl,
+      stage1Id: typeof linkId === 'number' ? linkId : undefined,
     };
   };
 
@@ -240,7 +218,6 @@ export default function App() {
 
     setDomains([...domains, newDomain]);
 
-    // Add Audit Log
     const newLog: AuditLog = {
       id: 'aud_' + Date.now(),
       userId: currentUser.id,
@@ -260,123 +237,10 @@ export default function App() {
       sslActive: true,
       verifiedAt: new Date().toISOString().replace('T', ' ').substring(0, 19)
     } : d));
-
-    const dom = domains.find(d => d.id === domainId);
-    const newLog: AuditLog = {
-      id: 'aud_' + Date.now(),
-      userId: currentUser.id,
-      userName: currentUser.name,
-      action: `Successfully verified DNS TXT challenge and activated domain ${dom?.domainName}`,
-      ip: '192.168.1.1',
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
-    };
-    setAuditLogs([newLog, ...auditLogs]);
   };
 
   const handleDeleteDomain = (domainId: string) => {
     setDomains(domains.filter(d => d.id !== domainId));
-  };
-
-  const handlePurchasePackage = (pkg: PackageTier, paymentMethod: 'bkash_nagad' | 'bank_transfer' | 'stripe_card', trxRef: string, notes?: string) => {
-    const newOrder: OrderRecord = {
-      id: 'ord_' + Date.now(),
-      orderNumber: `LP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      userId: currentUser.id,
-      userName: currentUser.name,
-      packageId: pkg.id,
-      packageName: `${pkg.name} (${pkg.billingPeriod})`,
-      amount: pkg.price,
-      currency: pkg.currency,
-      paymentMethod,
-      transactionReference: trxRef,
-      status: 'pending_review',
-      receiptNotes: notes || '',
-      createdAt: new Date().toISOString().replace('T', ' ').substring(0, 19)
-    };
-
-    setOrders([newOrder, ...orders]);
-
-    const newLog: AuditLog = {
-      id: 'aud_' + Date.now(),
-      userId: currentUser.id,
-      userName: currentUser.name,
-      action: `Submitted order ${newOrder.orderNumber} for ${pkg.name} via ${paymentMethod} (Ref: ${trxRef})`,
-      ip: '192.168.1.1',
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
-    };
-    setAuditLogs([newLog, ...auditLogs]);
-  };
-
-  const handleApproveOrder = (orderId: string) => {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
-
-    setOrders(orders.map(o => o.id === orderId ? {
-      ...o,
-      status: 'approved',
-      reviewedAt: new Date().toISOString().replace('T', ' ').substring(0, 19)
-    } : o));
-
-    // Upgrade target user
-    setUsers(users.map(u => u.id === order.userId ? {
-      ...u,
-      packageId: order.packageId
-    } : u));
-
-    if (currentUser.id === order.userId) {
-      setCurrentUser({
-        ...currentUser,
-        packageId: order.packageId
-      });
-    }
-
-    const newLog: AuditLog = {
-      id: 'aud_' + Date.now(),
-      userId: currentUser.id,
-      userName: currentUser.name,
-      action: `Approved order ${order.orderNumber} and upgraded user ${order.userName} to ${order.packageName}`,
-      ip: '192.168.1.1',
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
-    };
-    setAuditLogs([newLog, ...auditLogs]);
-  };
-
-  const handleRejectOrder = (orderId: string) => {
-    setOrders(orders.map(o => o.id === orderId ? { ...o, status: 'rejected' } : o));
-  };
-
-  const handleUpdateUserStatus = (userId: string, newStatus: 'active' | 'suspended') => {
-    setUsers(users.map(u => u.id === userId ? { ...u, status: newStatus } : u));
-  };
-
-  const handleToggleUserAllDomains = (userId: string) => {
-    setUsers(users.map(u => u.id === userId ? {
-      ...u,
-      hasAllDomainsAccess: !u.hasAllDomainsAccess
-    } : u));
-    if (currentUser.id === userId) {
-      setCurrentUser({
-        ...currentUser,
-        hasAllDomainsAccess: !currentUser.hasAllDomainsAccess
-      });
-    }
-  };
-
-  const handleSetUserDomainPermission = (userId: string, domainId: string, isAllowed: boolean) => {
-    const existing = permissions.find(p => p.userId === userId && p.domainId === domainId);
-    if (existing) {
-      setPermissions(permissions.map(p => p.id === existing.id ? { ...p, isAllowed } : p));
-    } else {
-      const newPerm: UserDomainPermission = {
-        id: 'prm_' + Date.now(),
-        userId,
-        domainId,
-        isAllowed,
-        grantedBy: currentUser.id,
-        grantedAt: new Date().toISOString().replace('T', ' ').substring(0, 19)
-      };
-      setPermissions([...permissions, newPerm]);
-    }
   };
 
   return (
@@ -395,6 +259,8 @@ export default function App() {
         onLogout={() => alert(language === 'bn' ? 'সফলভাবে লগআউট করা হয়েছে।' : 'Successfully logged out.')}
         backendUrl={apiClient.getConfig().baseUrl}
         onOpenCloudflareTab={() => setActiveTab('cloudflare')}
+        backendHealth={backendHealth}
+        onRefreshHealth={checkBackendHealth}
       />
 
       {/* Main Body Layout */}
@@ -424,10 +290,12 @@ export default function App() {
               settings={settings}
               darkMode={darkMode}
               language={language}
+              backendHealth={backendHealth}
               onAddLink={handleAddLink}
               onNavigateLinks={() => setActiveTab('links')}
               onNavigateDomains={() => setActiveTab('domains')}
               onNavigateBilling={() => setActiveTab('billing')}
+              onNavigateCloudflare={() => setActiveTab('cloudflare')}
             />
           )}
 
@@ -460,6 +328,16 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'analytics' && (
+            <AnalyticsView
+              links={links}
+              clickEvents={clickEvents}
+              settings={settings}
+              darkMode={darkMode}
+              language={language}
+            />
+          )}
+
           {activeTab === 'billing' && (
             <PackagesBillingView
               packages={packages}
@@ -468,33 +346,24 @@ export default function App() {
               orders={orders}
               darkMode={darkMode}
               language={language}
-              onPurchasePackage={handlePurchasePackage}
-            />
-          )}
-
-          {activeTab === 'analytics' && (
-            <AnalyticsView
-              clickEvents={clickEvents}
-              links={links}
-              settings={settings}
-              darkMode={darkMode}
-              language={language}
-            />
-          )}
-
-          {activeTab === 'sandbox' && (
-            <RedirectSandboxView
-              links={links}
-              domains={domains}
-              darkMode={darkMode}
-              language={language}
-            />
-          )}
-
-          {activeTab === 'installer' && (
-            <InstallWizardView
-              language={language}
-              darkMode={darkMode}
+              onPurchasePackage={(pkg, method, trxRef, notes) => {
+                const newOrder: OrderRecord = {
+                  id: 'ord_' + Date.now(),
+                  orderNumber: 'ORD-' + Math.floor(100000 + Math.random() * 900000),
+                  userId: currentUser.id,
+                  userName: currentUser.name,
+                  packageId: pkg.id,
+                  packageName: pkg.name,
+                  amount: pkg.price,
+                  currency: 'BDT',
+                  paymentMethod: method,
+                  transactionReference: trxRef,
+                  status: 'pending_review',
+                  receiptNotes: notes,
+                  createdAt: new Date().toISOString().replace('T', ' ').substring(0, 19)
+                };
+                setOrders([newOrder, ...orders]);
+              }}
             />
           )}
 
@@ -510,17 +379,39 @@ export default function App() {
               darkMode={darkMode}
               language={language}
               onUpdateSettings={setSettings}
-              onUpdateUserStatus={handleUpdateUserStatus}
-              onToggleUserAllDomains={handleToggleUserAllDomains}
-              onSetUserDomainPermission={handleSetUserDomainPermission}
+              onUpdateUserStatus={(userId, newStatus) => {
+                setUsers(users.map(u => u.id === userId ? { ...u, status: newStatus } : u));
+              }}
+              onToggleUserAllDomains={(userId) => {
+                setUsers(users.map(u => u.id === userId ? { ...u, hasAllDomainsAccess: !u.hasAllDomainsAccess } : u));
+              }}
+              onSetUserDomainPermission={(userId, domainId, isAllowed) => {
+                const existing = permissions.find(p => p.userId === userId && p.domainId === domainId);
+                if (existing) {
+                  setPermissions(permissions.map(p => p.userId === userId && p.domainId === domainId ? { ...p, isAllowed } : p));
+                } else {
+                  setPermissions([...permissions, {
+                    id: 'perm_' + Date.now(),
+                    userId,
+                    domainId,
+                    isAllowed,
+                    grantedBy: currentUser.name,
+                    grantedAt: new Date().toISOString().replace('T', ' ').substring(0, 19)
+                  }]);
+                }
+              }}
               onVerifyDomain={handleVerifyDomain}
-              onApproveOrder={handleApproveOrder}
-              onRejectOrder={handleRejectOrder}
+              onApproveOrder={(orderId) => {
+                setOrders(orders.map(o => o.id === orderId ? { ...o, status: 'approved', reviewedAt: new Date().toISOString().replace('T', ' ').substring(0, 19) } : o));
+              }}
+              onRejectOrder={(orderId) => {
+                setOrders(orders.map(o => o.id === orderId ? { ...o, status: 'rejected', reviewedAt: new Date().toISOString().replace('T', ' ').substring(0, 19) } : o));
+              }}
             />
           )}
 
-          {activeTab === 'cloudflare' && (
-            <CloudflareIntegrationView
+          {activeTab === 'installer' && (
+            <InstallWizardView
               darkMode={darkMode}
               language={language}
             />
@@ -532,15 +423,27 @@ export default function App() {
               language={language}
             />
           )}
+
+          {activeTab === 'sandbox' && (
+            <RedirectSandboxView
+              links={links}
+              domains={domains}
+              darkMode={darkMode}
+              language={language}
+            />
+          )}
+
+          {activeTab === 'cloudflare' && (
+            <CloudflareIntegrationView
+              darkMode={darkMode}
+              language={language}
+            />
+          )}
         </main>
       </div>
 
       {/* Footer */}
-      <Footer
-        settings={settings}
-        darkMode={darkMode}
-        language={language}
-      />
+      <Footer settings={settings} darkMode={darkMode} language={language} />
     </div>
   );
 }
